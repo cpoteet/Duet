@@ -9,7 +9,7 @@
     <key>CFBundleExecutable</key>
 	<string>Duet</string>
     <key>CFBundleIdentifier</key>
-    <string>com.chris.promptpair</string>
+    <string>com.siolon.duet</string>
     <key>CFBundleInfoDictionaryVersion</key>
     <string>6.0</string>
     <key>CFBundleIconFile</key>

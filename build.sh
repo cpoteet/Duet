@@ -25,7 +25,7 @@ if pgrep -x "$APP_NAME" >/dev/null; then
   fi
 fi
 
-rm -rf "$BUILD_DIR" "$APP_BUNDLE" "$DIST_DIR/Prompt Pair.app"
+rm -rf "$BUILD_DIR" "$APP_BUNDLE"
 mkdir -p "$BUILD_DIR" "$APP_BUNDLE/Contents/MacOS" "$APP_BUNDLE/Contents/Resources"
 
 xcrun swiftc \

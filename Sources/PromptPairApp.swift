@@ -1,0 +1,39 @@
+import SwiftUI
+
+@main
+struct DuetApp: App {
+    @StateObject private var appState = AppState()
+    @Environment(\.openWindow) private var openWindow
+
+    var body: some Scene {
+        WindowGroup("Duet") {
+            ContentView(appState: appState)
+        }
+        .windowResizability(.contentMinSize)
+        .windowStyle(.hiddenTitleBar)
+
+        Window("About Duet", id: "about") {
+            AboutView()
+        }
+        .windowResizability(.contentSize)
+
+        .commands {
+            CommandGroup(replacing: .newItem) { }
+            CommandGroup(replacing: .appInfo) {
+                Button("About Duet") {
+                    openWindow(id: "about")
+                }
+            }
+            CommandMenu("Session") {
+                Button("Reset ChatGPT Website Data", role: .destructive) {
+                    Task { await appState.clearWebsiteData(for: .chatGPT) }
+                }
+                .disabled(appState.isBusy(.chatGPT))
+                Button("Reset Claude Website Data", role: .destructive) {
+                    Task { await appState.clearWebsiteData(for: .claude) }
+                }
+                .disabled(appState.isBusy(.claude))
+            }
+        }
+    }
+}

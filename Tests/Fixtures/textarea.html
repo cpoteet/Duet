@@ -1,0 +1,14 @@
+<!doctype html>
+<html><body>
+<textarea aria-label="Message"></textarea><button aria-label="Send prompt">Send</button>
+<script>
+const composer = document.querySelector('textarea');
+document.querySelector('button').addEventListener('click', () => {
+  const message = document.createElement('div');
+  message.dataset.messageAuthorRole = 'user';
+  message.textContent = composer.value;
+  document.body.appendChild(message);
+  composer.value = '';
+});
+</script>
+</body></html>

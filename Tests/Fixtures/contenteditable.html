@@ -1,0 +1,14 @@
+<!doctype html>
+<html><body>
+<div contenteditable="true" role="textbox"></div><button aria-label="Send message">Send</button>
+<script>
+const composer = document.querySelector('[contenteditable]');
+document.querySelector('button').addEventListener('click', () => {
+  const message = document.createElement('div');
+  message.dataset.testid = 'user-message';
+  message.textContent = composer.innerText;
+  document.body.appendChild(message);
+  composer.textContent = '';
+});
+</script>
+</body></html>

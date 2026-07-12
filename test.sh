@@ -31,6 +31,7 @@ xcrun swiftc \
   "$ROOT/Sources/Domain.swift" \
   "$ROOT/Sources/ProviderAdapter.swift" \
   "$ROOT/Sources/WebBrowser.swift" \
+  "$ROOT/Sources/AppState.swift" \
   "$ROOT/Tests/HostLifecycleTests.swift" \
   -o "$BUILD_DIR/HostLifecycleTests"
 

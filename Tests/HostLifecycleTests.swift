@@ -77,6 +77,36 @@ struct HostLifecycleTests {
             "Old host removed a WKWebView after it moved to the split-pane host"
         )
 
+        let workspaceState = AppState()
+        expect(workspaceState.isLaunchChooserVisible, "Workspace should begin at the tool chooser")
+        workspaceState.openWorkspace(for: .service(.claude))
+        expect(!workspaceState.isLaunchChooserVisible, "A provider destination should leave the tool chooser")
+        expect(workspaceState.selectedService == .claude, "Claude destination should select Claude")
+        expect(!workspaceState.isSplitView, "A single-provider destination should use one pane")
+        workspaceState.openWorkspace(for: .both)
+        expect(workspaceState.isSplitView, "Both destination should use split view")
+        workspaceState.browserDidMount(.chatGPT)
+        workspaceState.browserDidMount(.claude)
+        let splitWorkspaceMounted = await workspaceState.waitForSplitWorkspaceMount(timeout: 0.01)
+        expect(splitWorkspaceMounted, "Both split-pane browser hosts should mount before quick-prompt dispatch")
+        workspaceState.openWorkspace(for: .service(.claude))
+        expect(workspaceState.selectedService == .claude, "Later Claude destination should select Claude")
+        expect(!workspaceState.isSplitView, "Later single-provider destination should leave split view")
+        workspaceState.openQuickPromptWorkspace(for: .both)
+        expect(workspaceState.isSplitView, "Quick Prompt Both destination should use a fresh split workspace")
+        workspaceState.browserDidMount(.chatGPT)
+        workspaceState.browserDidMount(.claude)
+        workspaceState.openQuickPromptWorkspace(for: .both)
+        let staleSplitWorkspaceMounted = await workspaceState.waitForSplitWorkspaceMount(timeout: 0.01)
+        expect(
+            !staleSplitWorkspaceMounted,
+            "Recreated split-pane browsers must not inherit stale mount state"
+        )
+        workspaceState.browserDidMount(.chatGPT)
+        workspaceState.browserDidMount(.claude)
+        let recreatedSplitWorkspaceMounted = await workspaceState.waitForSplitWorkspaceMount(timeout: 0.01)
+        expect(recreatedSplitWorkspaceMounted, "Recreated split-pane browser hosts should report their new mounts")
+
         do {
             try await testComposerFixture(
                 named: "textarea.html",

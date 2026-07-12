@@ -3,11 +3,17 @@ import SwiftUI
 @main
 struct DuetApp: App {
     @StateObject private var appState = AppState()
+    @NSApplicationDelegateAdaptor(DuetApplicationDelegate.self) private var applicationDelegate
     @Environment(\.openWindow) private var openWindow
 
     var body: some Scene {
-        WindowGroup("Duet") {
+        WindowGroup("Duet", id: "workspace") {
             ContentView(appState: appState)
+                .onAppear {
+                    applicationDelegate.configureQuickPrompt(with: appState) {
+                        openWindow(id: "workspace")
+                    }
+                }
         }
         .windowResizability(.contentMinSize)
         .windowStyle(.hiddenTitleBar)
@@ -33,6 +39,11 @@ struct DuetApp: App {
                     Task { await appState.clearWebsiteData(for: .claude) }
                 }
                 .disabled(appState.isBusy(.claude))
+            }
+            CommandMenu("Tools") {
+                Button("Quick Prompt") {
+                    applicationDelegate.showQuickPrompt()
+                }
             }
         }
     }

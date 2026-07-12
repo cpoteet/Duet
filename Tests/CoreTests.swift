@@ -11,6 +11,8 @@ struct CoreTests {
 
         expect(ChatService.chatGPT.startURL.absoluteString == "https://www.chatgpt.com", "ChatGPT start URL changed")
         expect(ChatService.claude.startURL.absoluteString == "https://claude.ai", "Claude start URL changed")
+        expect(ChatService.chatGPT.newConversationURL.absoluteString == "https://www.chatgpt.com/", "ChatGPT new conversation URL changed")
+        expect(ChatService.claude.newConversationURL.absoluteString == "https://claude.ai/new", "Claude new conversation URL changed")
         expect(ChatService.allCases.count == 2, "Expected exactly two services")
         expect(ChatService.chatGPT.allowsNavigation(to: URL(string: "https://auth.openai.com/login")!), "ChatGPT auth host must be allowed")
         expect(ChatService.claude.allowsNavigation(to: URL(string: "https://accounts.google.com/signin")!), "Shared identity provider must be allowed")

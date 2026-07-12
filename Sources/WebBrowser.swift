@@ -75,8 +75,16 @@ final class BrowserController: NSObject, ObservableObject {
         NSWorkspace.shared.open(service.startURL)
     }
 
-    func dispatch(prompt: String, timeout: TimeInterval = 12) async -> PromptDispatchOutcome {
-        _ = acquire()
+    func dispatch(
+        prompt: String,
+        startsNewConversation: Bool = false,
+        timeout: TimeInterval = 12
+    ) async -> PromptDispatchOutcome {
+        if startsNewConversation {
+            openNewConversation()
+        } else {
+            _ = acquire()
+        }
         let ready = await waitForComposer(timeout: timeout)
         guard ready else {
             if await isLoginRequired() { return .loginRequired }
@@ -98,6 +106,13 @@ final class BrowserController: NSObject, ObservableObject {
         } catch {
             return .failed("Could not talk to page")
         }
+    }
+
+    private func openNewConversation() {
+        let webView = prepare()
+        webView.stopLoading()
+        phase = .loading
+        webView.load(URLRequest(url: service.newConversationURL))
     }
 
     func clearWebsiteData() async {

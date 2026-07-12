@@ -20,6 +20,14 @@ enum ChatService: String, CaseIterable, Identifiable, Hashable {
         }
     }
 
+    /// The blank-conversation entry point used by the native quick prompt.
+    var newConversationURL: URL {
+        switch self {
+        case .chatGPT: URL(string: "https://www.chatgpt.com/")!
+        case .claude: URL(string: "https://claude.ai/new")!
+        }
+    }
+
     private var promptHosts: [String] {
         switch self {
         case .chatGPT: ["chatgpt.com"]
@@ -126,5 +134,6 @@ struct PromptDispatchResult: Equatable {
 
 enum PromptTarget {
     case current
+    case service(ChatService)
     case both
 }

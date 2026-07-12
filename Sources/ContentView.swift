@@ -5,7 +5,6 @@ struct ContentView: View {
     @ObservedObject var appState: AppState
     @State private var isComposerOpen = false
     @AppStorage("splitViewRatio") private var splitViewRatio = 0.5
-    @State private var isLaunchChooserVisible = true
     @State private var isSplitDividerHovering = false
     @State private var splitRatioAtDragStart: CGFloat?
     @State private var toast: DispatchToast?
@@ -19,7 +18,7 @@ struct ContentView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            if isLaunchChooserVisible {
+            if appState.isLaunchChooserVisible {
                 launchChooser
                 launchPromptDrawer
             } else {
@@ -101,30 +100,16 @@ struct ContentView: View {
 
     private func beginSession(with destination: LaunchDestination) {
         isComposerOpen = false
-        switch destination {
-        case .chatGPT:
-            appState.select(.chatGPT)
-        case .claude:
-            appState.select(.claude)
-        case .both:
-            appState.setSplitView(true)
-        }
-        isLaunchChooserVisible = false
+        appState.openWorkspace(for: destination.promptTarget)
     }
 
     private var launchPromptDrawer: some View {
-        HStack(spacing: 7) {
-            Image(systemName: "chevron.up")
-            Text("Prompt — choose a tool to begin")
-        }
-        .font(.system(size: 13, weight: .medium))
-        .foregroundStyle(palette.secondaryText)
+        Color.clear
         .frame(maxWidth: .infinity)
         .frame(height: 43)
         .background(palette.drawer)
         .overlay(alignment: .top) { hairline }
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel("Prompt is collapsed until a tool is selected")
+        .accessibilityHidden(true)
     }
 
     @ViewBuilder
@@ -679,6 +664,14 @@ private enum LaunchDestination {
         case .chatGPT: "ChatGPT"
         case .claude: "Claude"
         case .both: "Both"
+        }
+    }
+
+    var promptTarget: PromptTarget {
+        switch self {
+        case .chatGPT: .service(.chatGPT)
+        case .claude: .service(.claude)
+        case .both: .both
         }
     }
 }

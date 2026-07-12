@@ -10,7 +10,6 @@ final class BrowserController: NSObject, ObservableObject {
 
     @Published private(set) var phase: BrowserPhase = .unloaded
     private(set) var webView: WKWebView?
-    private var popupWindows: [ObjectIdentifier: NSWindow] = [:]
     private var hasRetriedBlankInitialClaudeLoad = false
 
     init(service: ChatService) {
@@ -55,7 +54,6 @@ final class BrowserController: NSObject, ObservableObject {
 
     func release() {
         guard let webView else { return }
-        closeAllPopups()
         webView.stopLoading()
         webView.removeFromSuperview()
         webView.navigationDelegate = nil
@@ -252,19 +250,6 @@ final class BrowserController: NSObject, ObservableObject {
         }
     }
 
-    private func closeAllPopups() {
-        let windows = Array(popupWindows.values)
-        popupWindows.removeAll()
-        for window in windows {
-            if let popup = window.contentView as? WKWebView {
-                popup.stopLoading()
-                popup.navigationDelegate = nil
-                popup.uiDelegate = nil
-            }
-            window.delegate = nil
-            window.close()
-        }
-    }
 }
 
 private enum BrowserError: Error {
@@ -309,7 +294,6 @@ extension BrowserController: WKNavigationDelegate {
 
     nonisolated func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
         Task { @MainActor in
-            self.updatePopupTitle(for: webView)
             guard self.webView === webView else { return }
             self.phase = .loading
         }
@@ -317,7 +301,6 @@ extension BrowserController: WKNavigationDelegate {
 
     nonisolated func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         Task { @MainActor in
-            self.updatePopupTitle(for: webView)
             guard self.webView === webView else { return }
             self.phase = .ready
             await self.detectVerificationChallenge(in: webView)
@@ -344,10 +327,6 @@ extension BrowserController: WKNavigationDelegate {
         NSWorkspace.shared.open(url)
     }
 
-    private func updatePopupTitle(for webView: WKWebView) {
-        guard let window = popupWindows[ObjectIdentifier(webView)] else { return }
-        window.title = webView.url?.host ?? "Web Page"
-    }
 }
 
 extension BrowserController: WKUIDelegate {
@@ -357,64 +336,15 @@ extension BrowserController: WKUIDelegate {
         for navigationAction: WKNavigationAction,
         windowFeatures: WKWindowFeatures
     ) -> WKWebView? {
-        // WebKit asks synchronously for the target of window.open. Returning the
-        // managed child view keeps OAuth and provider login windows in-app.
+        // Disposing a provider-created WKWebView window can crash on macOS 26.
+        // Use the system browser for new windows, which also gives those flows
+        // their normal browser popup and authentication behavior.
         MainActor.assumeIsolated {
-            guard let url = navigationAction.request.url, self.service.allowsNavigation(to: url) else {
-                if let url = navigationAction.request.url {
-                    self.openExternalURLIfSafe(url)
-                }
-                return nil
+            if let url = navigationAction.request.url {
+                self.openExternalURLIfSafe(url)
             }
-            return self.presentPopup(configuration: configuration, initialURL: url)
+            return nil
         }
-    }
-
-    nonisolated func webViewDidClose(_ webView: WKWebView) {
-        MainActor.assumeIsolated {
-            self.closePopup(for: webView)
-        }
-    }
-
-    private func presentPopup(configuration: WKWebViewConfiguration, initialURL: URL) -> WKWebView {
-        let popupWebView = WKWebView(frame: .zero, configuration: configuration)
-        popupWebView.navigationDelegate = self
-        popupWebView.uiDelegate = self
-        let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 700, height: 780),
-            styleMask: [.titled, .closable, .resizable, .miniaturizable],
-            backing: .buffered,
-            defer: false
-        )
-        window.title = initialURL.host ?? "Web Page"
-        window.contentView = popupWebView
-        window.delegate = self
-        window.center()
-        window.makeKeyAndOrderFront(nil)
-        popupWindows[ObjectIdentifier(popupWebView)] = window
-        return popupWebView
-    }
-
-    private func closePopup(for webView: WKWebView) {
-        guard let window = popupWindows.removeValue(forKey: ObjectIdentifier(webView)) else { return }
-        webView.stopLoading()
-        webView.navigationDelegate = nil
-        webView.uiDelegate = nil
-        window.delegate = nil
-        window.close()
-    }
-}
-
-extension BrowserController: NSWindowDelegate {
-    func windowWillClose(_ notification: Notification) {
-        guard let window = notification.object as? NSWindow,
-              let entry = popupWindows.first(where: { $0.value === window }) else { return }
-        if let popup = window.contentView as? WKWebView {
-            popup.stopLoading()
-            popup.navigationDelegate = nil
-            popup.uiDelegate = nil
-        }
-        popupWindows.removeValue(forKey: entry.key)
     }
 }
 

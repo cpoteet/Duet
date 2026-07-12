@@ -10,6 +10,21 @@ EXECUTABLE="$APP_BUNDLE/Contents/MacOS/$APP_NAME"
 ICON_SOURCE="$ROOT/Resources/DuetIcon.png"
 ICONSET="$BUILD_DIR/Duet.iconset"
 
+if pgrep -x "$APP_NAME" >/dev/null; then
+  echo "Closing running $APP_NAME…"
+  pkill -x "$APP_NAME" || true
+
+  for _ in {1..50}; do
+    pgrep -x "$APP_NAME" >/dev/null || break
+    sleep 0.1
+  done
+
+  if pgrep -x "$APP_NAME" >/dev/null; then
+    echo "Could not close $APP_NAME; rebuild aborted." >&2
+    exit 1
+  fi
+fi
+
 rm -rf "$BUILD_DIR" "$APP_BUNDLE" "$DIST_DIR/Prompt Pair.app"
 mkdir -p "$BUILD_DIR" "$APP_BUNDLE/Contents/MacOS" "$APP_BUNDLE/Contents/Resources"
 
@@ -50,4 +65,5 @@ fi
 
 codesign --force --sign - "$APP_BUNDLE" >/dev/null
 
-echo "Built: $APP_BUNDLE"
+open "$APP_BUNDLE"
+echo "Built and launched: $APP_BUNDLE"

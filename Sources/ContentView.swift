@@ -134,8 +134,6 @@ struct ContentView: View {
                 providerPicker
                 Spacer(minLength: 20)
                 splitToggle
-                divider
-                serviceStatus(appState.selectedService)
             }
             .padding(.horizontal, 16)
             .frame(height: 54)
@@ -175,7 +173,6 @@ struct ContentView: View {
         }
         .padding(2)
         .background(palette.controlWell, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-        .disabled(appState.hasActiveOperations)
     }
 
     private var splitToggle: some View {
@@ -187,7 +184,6 @@ struct ContentView: View {
         .font(.system(size: 14, weight: .medium))
         .foregroundStyle(palette.secondaryText)
         .tint(palette.accent)
-        .disabled(appState.hasActiveOperations)
         .accessibilityHint("Shows ChatGPT and Claude side by side")
     }
 
@@ -338,13 +334,6 @@ struct ContentView: View {
                     Text(service.title)
                         .font(.system(size: 14, weight: .semibold))
                         .foregroundStyle(palette.primaryText)
-                    if appState.statuses[service] == .sending {
-                        Text("·")
-                            .foregroundStyle(palette.tertiaryText)
-                        Text("Sending…")
-                            .font(.system(size: 13, weight: .regular))
-                            .foregroundStyle(palette.secondaryText)
-                    }
                     Spacer(minLength: 12)
                 }
                 .padding(.horizontal, 20)
@@ -421,21 +410,24 @@ struct ContentView: View {
                     }
                     .buttonStyle(PromptButtonStyle(kind: .secondary, palette: palette))
                     .keyboardShortcut(.return, modifiers: [.command, .option])
-                    .disabled(!canSend(to: .both))
+                    .disabled(!hasPromptText)
+                    .allowsHitTesting(canSend(to: .both))
 
                     Button("Send to \(appState.selectedService.title)") {
                         sendAndCollapse(to: .current)
                     }
                     .buttonStyle(PromptButtonStyle(kind: .primary, palette: palette))
                     .keyboardShortcut(.return, modifiers: [.command])
-                    .disabled(!canSend(to: .current))
+                    .disabled(!hasPromptText)
+                    .allowsHitTesting(canSend(to: .current))
                 } else {
                     Button("Send to Both") {
                         sendAndCollapse(to: .both)
                     }
                     .buttonStyle(PromptButtonStyle(kind: .primary, palette: palette))
                     .keyboardShortcut(.return, modifiers: [.command])
-                    .disabled(!canSend(to: .both))
+                    .disabled(!hasPromptText)
+                    .allowsHitTesting(canSend(to: .both))
                 }
             }
         }
@@ -444,6 +436,7 @@ struct ContentView: View {
     }
 
     private func sendAndCollapse(to target: PromptTarget) {
+        guard canSend(to: target) else { return }
         Task {
             let results = await appState.send(to: target)
             presentToast(for: results)
@@ -454,8 +447,11 @@ struct ContentView: View {
     }
 
     private func canSend(to target: PromptTarget) -> Bool {
+        hasPromptText && appState.canSend(to: target)
+    }
+
+    private var hasPromptText: Bool {
         !appState.prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            && appState.canSend(to: target)
     }
 
     private var collapsedComposer: some View {
@@ -464,7 +460,7 @@ struct ContentView: View {
         } label: {
             HStack(spacing: 7) {
                 Image(systemName: "chevron.up")
-                Text("Prompt — collapsed, ⌘⇧P to expand")
+                Text("Prompt (⌘⇧P)")
             }
             .font(.system(size: 13, weight: .medium))
             .foregroundStyle(palette.secondaryText)
@@ -475,21 +471,6 @@ struct ContentView: View {
         .buttonStyle(.plain)
         .keyboardShortcut("p", modifiers: [.command, .shift])
         .help("Open shared prompt")
-    }
-
-    private func serviceStatus(_ service: ChatService) -> some View {
-        let status = appState.statuses[service] ?? .idle
-        return HStack(spacing: 7) {
-            Circle()
-                .fill(statusColor(for: status, service: service))
-                .frame(width: 9, height: 9)
-            if status == .sending {
-                Text("Sending…")
-            }
-        }
-        .font(.system(size: 14, weight: .medium))
-        .foregroundStyle(palette.secondaryText)
-        .accessibilityLabel("\(service.title): \(status.label)")
     }
 
     private func dispatchToast(_ toast: DispatchToast) -> some View {
@@ -616,25 +597,12 @@ struct ContentView: View {
         }
     }
 
-    private func statusColor(for status: PromptDispatchStatus, service: ChatService) -> Color {
-        switch status {
-        case .idle, .sent: return providerColor(for: service)
-        case .sending: return Color(red: 0.25, green: 0.60, blue: 0.93)
-        case .loginRequired, .unavailable, .failed: return Color(red: 0.92, green: 0.49, blue: 0.23)
-        }
-    }
-
     private var hairline: some View {
         Rectangle()
             .fill(palette.border)
             .frame(height: 1)
     }
 
-    private var divider: some View {
-        Rectangle()
-            .fill(palette.border)
-            .frame(width: 1, height: 28)
-    }
 }
 
 private struct DispatchToast: Identifiable, Equatable {

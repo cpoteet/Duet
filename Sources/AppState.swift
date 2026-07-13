@@ -28,6 +28,7 @@ final class AppState: ObservableObject {
     }
 
     func select(_ service: ChatService) {
+        guard !hasActiveOperations else { return }
         let previous = selectedService
         _ = browser(for: service).prepare()
         selectedService = service
@@ -66,6 +67,7 @@ final class AppState: ObservableObject {
     }
 
     func setSplitView(_ enabled: Bool) {
+        guard !hasActiveOperations else { return }
         let wasSplitView = isSplitView
         isSplitView = enabled
         if enabled {

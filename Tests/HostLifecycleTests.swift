@@ -77,12 +77,46 @@ struct HostLifecycleTests {
             "Old host removed a WKWebView after it moved to the split-pane host"
         )
 
+        let focusWindow = NSWindow(
+            contentRect: .init(x: 0, y: 0, width: 400, height: 400),
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        let focusHost = BrowserHostView(frame: focusWindow.contentView?.bounds ?? .zero)
+        let focusedWebView = WKWebView(frame: focusHost.bounds, configuration: WKWebViewConfiguration())
+        focusWindow.contentView = focusHost
+        focusHost.install(focusedWebView)
+        let acceptedWebViewFocus = focusWindow.makeFirstResponder(focusedWebView)
+        expect(acceptedWebViewFocus, "Retained-pane focus test could not focus its web view")
+        focusHost.setAcceptsKeyboardInput(false)
+        expect(
+            focusWindow.firstResponder !== focusedWebView,
+            "An inactive retained pane should resign keyboard focus"
+        )
+
         let workspaceState = AppState()
         expect(workspaceState.isLaunchChooserVisible, "Workspace should begin at the tool chooser")
         workspaceState.openWorkspace(for: .service(.claude))
         expect(!workspaceState.isLaunchChooserVisible, "A provider destination should leave the tool chooser")
         expect(workspaceState.selectedService == .claude, "Claude destination should select Claude")
         expect(!workspaceState.isSplitView, "A single-provider destination should use one pane")
+        let releasableClaudeView = workspaceState.browser(for: .claude).webView
+        workspaceState.openWorkspace(for: .service(.chatGPT))
+        workspaceState.browserDidMount(.chatGPT)
+        expect(
+            releasableClaudeView != nil && workspaceState.browser(for: .claude).webView == nil,
+            "The default single-pane mode should release its inactive web view"
+        )
+        workspaceState.setKeepsProvidersLoaded(true)
+        workspaceState.openWorkspace(for: .service(.claude))
+        let retainedClaudeView = workspaceState.browser(for: .claude).webView
+        workspaceState.openWorkspace(for: .service(.chatGPT))
+        workspaceState.browserDidMount(.chatGPT)
+        expect(
+            retainedClaudeView != nil && workspaceState.browser(for: .claude).webView === retainedClaudeView,
+            "The faster-switching setting should keep the inactive web view alive"
+        )
         workspaceState.openWorkspace(for: .both)
         expect(workspaceState.isSplitView, "Both destination should use split view")
         workspaceState.browserDidMount(.chatGPT)
@@ -92,6 +126,15 @@ struct HostLifecycleTests {
         workspaceState.openWorkspace(for: .service(.claude))
         expect(workspaceState.selectedService == .claude, "Later Claude destination should select Claude")
         expect(!workspaceState.isSplitView, "Later single-provider destination should leave split view")
+        expect(
+            workspaceState.browser(for: .chatGPT).webView != nil,
+            "Leaving split view should retain the inactive provider when faster switching is enabled"
+        )
+        workspaceState.setKeepsProvidersLoaded(false)
+        expect(
+            workspaceState.browser(for: .chatGPT).webView == nil,
+            "Turning faster switching off should immediately release the inactive provider"
+        )
         workspaceState.openQuickPromptWorkspace(for: .both)
         expect(workspaceState.isSplitView, "Quick Prompt Both destination should use a fresh split workspace")
         workspaceState.browserDidMount(.chatGPT)

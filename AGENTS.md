@@ -19,7 +19,7 @@ Duet is a personal Apple Silicon macOS 15+ app for using ChatGPT and Claude in a
 ## App behavior
 
 - Load ChatGPT at `https://www.chatgpt.com` and Claude at `https://claude.ai` in persistent WebKit website-data stores so sessions normally survive relaunches.
-- Default to one active provider; split view is on demand. Release inactive web views in single-pane mode to reduce memory while retaining website session data.
+- Default to one active provider; split view is on demand. Release inactive web views in single-pane mode to reduce memory while retaining website session data, unless the user enables Keep both providers loaded for faster switching.
 - Quick Prompt is available globally with Control–Option–Space and from Tools → Quick Prompt. It sends to ChatGPT, Claude, or Both, always starts a fresh conversation for each selected provider, and brings the workspace forward for continued interaction.
 - The shared native prompt drawer is text-only, collapsed by default, stays open until explicitly closed, and provides Send to Current and Send to Both.
 - Sending fills each provider's composer, waits for its reactive send control, then invokes it. Show independent provider statuses and never auto-retry an ambiguous submission.

@@ -5,6 +5,7 @@ struct ContentView: View {
     @ObservedObject var appState: AppState
     @State private var isComposerOpen = false
     @AppStorage("splitViewRatio") private var splitViewRatio = 0.5
+    @AppStorage(AppPreferenceKey.keepProvidersLoaded) private var keepProvidersLoaded = false
     @State private var isSplitDividerHovering = false
     @State private var splitRatioAtDragStart: CGFloat?
     @State private var toast: DispatchToast?
@@ -32,6 +33,10 @@ struct ContentView: View {
         .animation(.easeOut(duration: 0.2), value: appState.isSplitView)
         .onAppear {
             isComposerOpen = false
+            appState.setKeepsProvidersLoaded(keepProvidersLoaded)
+        }
+        .onChange(of: keepProvidersLoaded) { _, isEnabled in
+            appState.setKeepsProvidersLoaded(isEnabled)
         }
         .onDisappear {
             toastDismissal?.cancel()
@@ -212,9 +217,23 @@ struct ContentView: View {
                         .frame(maxWidth: .infinity)
                 }
             }
+        } else if keepProvidersLoaded {
+            ZStack {
+                retainedSinglePane(.chatGPT)
+                retainedSinglePane(.claude)
+            }
         } else {
             servicePane(appState.selectedService)
         }
+    }
+
+    private func retainedSinglePane(_ service: ChatService) -> some View {
+        let isSelected = appState.selectedService == service
+        return servicePane(service)
+            .opacity(isSelected ? 1 : 0)
+            .allowsHitTesting(isSelected)
+            .accessibilityHidden(!isSelected)
+            .zIndex(isSelected ? 1 : 0)
     }
 
     private var browserAreaWithToast: some View {
@@ -335,10 +354,13 @@ struct ContentView: View {
             }
 
             ZStack {
-                BrowserView(browser: appState.browser(for: service)) {
-                        appState.browserDidMount(service)
-                    }
-                    .id(service)
+                BrowserView(
+                    browser: appState.browser(for: service),
+                    acceptsKeyboardInput: appState.isSplitView || appState.selectedService == service
+                ) {
+                    appState.browserDidMount(service)
+                }
+                .id(service)
                 if appState.browser(for: service).phase == .verificationRequired {
                     verificationNotice(for: service)
                 }

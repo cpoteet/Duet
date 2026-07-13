@@ -365,11 +365,13 @@ extension BrowserController: WKUIDelegate {
 
 final class BrowserHostView: NSView {
     private var hostedWebView: WKWebView?
+    private var acceptsKeyboardInput = true
     var onWindowAttachment: (() -> Void)?
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
         if window != nil {
+            resignHostedFirstResponderIfNeeded()
             onWindowAttachment?()
         }
     }
@@ -381,6 +383,12 @@ final class BrowserHostView: NSView {
         webView.frame = bounds
         webView.autoresizingMask = [.width, .height]
         addSubview(webView)
+        resignHostedFirstResponderIfNeeded()
+    }
+
+    func setAcceptsKeyboardInput(_ acceptsKeyboardInput: Bool) {
+        self.acceptsKeyboardInput = acceptsKeyboardInput
+        resignHostedFirstResponderIfNeeded()
     }
 
     func clear() {
@@ -393,22 +401,34 @@ final class BrowserHostView: NSView {
         }
         hostedWebView = nil
     }
+
+    private func resignHostedFirstResponderIfNeeded() {
+        guard !acceptsKeyboardInput,
+              let hostedWebView,
+              let window,
+              let firstResponder = window.firstResponder as? NSView,
+              firstResponder === hostedWebView || firstResponder.isDescendant(of: hostedWebView) else { return }
+        window.makeFirstResponder(nil)
+    }
 }
 
 struct BrowserView: NSViewRepresentable {
     @ObservedObject var browser: BrowserController
+    let acceptsKeyboardInput: Bool
     let onMounted: () -> Void
 
     func makeNSView(context: Context) -> BrowserHostView {
         let host = BrowserHostView()
         configure(host)
         host.install(browser.prepare())
+        host.setAcceptsKeyboardInput(acceptsKeyboardInput)
         return host
     }
 
     func updateNSView(_ nsView: BrowserHostView, context: Context) {
         configure(nsView)
         nsView.install(browser.prepare())
+        nsView.setAcceptsKeyboardInput(acceptsKeyboardInput)
         if nsView.window != nil {
             browser.activateWhenHosted()
             onMounted()

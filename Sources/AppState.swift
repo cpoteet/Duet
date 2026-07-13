@@ -14,6 +14,7 @@ final class AppState: ObservableObject {
     @Published private(set) var resettingServices: Set<ChatService> = []
 
     private let browsers: [ChatService: BrowserController]
+    private var keepsProvidersLoaded = false
     private var pendingSinglePaneRelease: ChatService?
     private var mountedSplitServices: Set<ChatService> = []
 
@@ -30,23 +31,38 @@ final class AppState: ObservableObject {
         let previous = selectedService
         _ = browser(for: service).prepare()
         selectedService = service
-        if !isSplitView && previous != service {
+        if !isSplitView, !keepsProvidersLoaded, previous != service {
             pendingSinglePaneRelease = previous
         }
     }
 
-    /// Called by the native host after the selected provider has been added to a
-    /// window. Keeping the old pane alive until this point avoids a blank first
-    /// visit when switching providers.
+    /// Tracks split-pane mounting and releases the previous single-pane browser
+    /// only after its replacement belongs to the visible window.
     func browserDidMount(_ service: ChatService) {
         if isSplitView {
             mountedSplitServices.insert(service)
             return
         }
 
-        guard !isSplitView, selectedService == service, let previous = pendingSinglePaneRelease else { return }
+        guard !keepsProvidersLoaded,
+              selectedService == service,
+              let previous = pendingSinglePaneRelease else { return }
         pendingSinglePaneRelease = nil
         browser(for: previous).release()
+    }
+
+    func setKeepsProvidersLoaded(_ enabled: Bool) {
+        guard keepsProvidersLoaded != enabled else { return }
+        keepsProvidersLoaded = enabled
+        pendingSinglePaneRelease = nil
+
+        if enabled {
+            ChatService.allCases.forEach { _ = browser(for: $0).prepare() }
+        } else if !isSplitView {
+            ChatService.allCases
+                .filter { $0 != selectedService }
+                .forEach { browser(for: $0).release() }
+        }
     }
 
     func setSplitView(_ enabled: Bool) {
@@ -59,10 +75,12 @@ final class AppState: ObservableObject {
             }
             ChatService.allCases.forEach { _ = browser(for: $0).prepare() }
         } else {
-            pendingSinglePaneRelease = nil
             mountedSplitServices.removeAll()
-            let inactive = ChatService.allCases.filter { $0 != selectedService }
-            inactive.forEach { browser(for: $0).release() }
+            if !keepsProvidersLoaded {
+                ChatService.allCases
+                    .filter { $0 != selectedService }
+                    .forEach { browser(for: $0).release() }
+            }
         }
     }
 

@@ -46,5 +46,9 @@ struct DuetApp: App {
                 }
             }
         }
+
+        Settings {
+            SettingsView()
+        }
     }
 }

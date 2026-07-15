@@ -95,6 +95,15 @@ struct HostLifecycleTests {
             "An inactive retained pane should resign keyboard focus"
         )
 
+        let filePickerSelector = NSSelectorFromString(
+            "webView:runOpenPanelWithParameters:initiatedByFrame:completionHandler:"
+        )
+        let browserController = BrowserController(service: .chatGPT)
+        expect(
+            browserController.responds(to: filePickerSelector),
+            "Browser controller should handle WebKit file-upload panels"
+        )
+
         let workspaceState = AppState()
         expect(workspaceState.isLaunchChooserVisible, "Workspace should begin at the tool chooser")
         workspaceState.openWorkspace(for: .service(.claude))

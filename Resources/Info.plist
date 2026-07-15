@@ -28,5 +28,7 @@
     <true/>
     <key>NSHumanReadableCopyright</key>
     <string>Personal local build</string>
+    <key>NSMicrophoneUsageDescription</key>
+    <string>Duet needs microphone access when you use dictation or audio chat in ChatGPT or Claude.</string>
 </dict>
 </plist>

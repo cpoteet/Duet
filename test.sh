@@ -36,3 +36,13 @@ xcrun swiftc \
   -o "$BUILD_DIR/HostLifecycleTests"
 
 "$BUILD_DIR/HostLifecycleTests"
+
+MICROPHONE_USAGE_DESCRIPTION=$(
+  plutil -extract NSMicrophoneUsageDescription raw "$ROOT/Resources/Info.plist"
+)
+if [[ -z "$MICROPHONE_USAGE_DESCRIPTION" ]]; then
+  echo "Missing NSMicrophoneUsageDescription in Resources/Info.plist" >&2
+  exit 1
+fi
+
+echo "Bundle privacy metadata tests passed."

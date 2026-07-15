@@ -347,6 +347,29 @@ extension BrowserController: WKNavigationDelegate {
 extension BrowserController: WKUIDelegate {
     nonisolated func webView(
         _ webView: WKWebView,
+        runOpenPanelWith parameters: WKOpenPanelParameters,
+        initiatedByFrame frame: WKFrameInfo,
+        completionHandler: @escaping @MainActor ([URL]?) -> Void
+    ) {
+        MainActor.assumeIsolated {
+            let panel = NSOpenPanel()
+            panel.allowsMultipleSelection = parameters.allowsMultipleSelection
+            panel.canChooseDirectories = parameters.allowsDirectories
+            panel.canChooseFiles = !parameters.allowsDirectories
+            panel.resolvesAliases = true
+
+            if let window = webView.window {
+                panel.beginSheetModal(for: window) { response in
+                    completionHandler(response == .OK ? panel.urls : nil)
+                }
+            } else {
+                completionHandler(panel.runModal() == .OK ? panel.urls : nil)
+            }
+        }
+    }
+
+    nonisolated func webView(
+        _ webView: WKWebView,
         createWebViewWith configuration: WKWebViewConfiguration,
         for navigationAction: WKNavigationAction,
         windowFeatures: WKWindowFeatures

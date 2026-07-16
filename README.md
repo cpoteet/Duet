@@ -23,7 +23,7 @@ Both the ChatGPT and Claude Mac apps are bloated Electron apps that are unnecess
 
 Duet runs on Apple Silicon Macs with macOS 15 or later.
 
-1. Download `Duet.zip` and double-click it to extract the `Duet` folder.
+1. Download `Duet.zip` from the [latest Duet release](https://github.com/cpoteet/Duet/releases/latest) and double-click it to extract the archive.
 2. Drag `Duet.app` to your **Applications** folder.
 3. Open Duet from Applications. macOS will notify you that the app is unsigned and cannot be verified.
 4. Close that notification, open **System Settings** → **Privacy & Security**, then scroll to the **Security** section.

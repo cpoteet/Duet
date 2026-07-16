@@ -2,6 +2,9 @@
 .build/
 dist/
 
+# Generated release archive (published through GitHub Releases)
+/Duet.zip
+
 # Product-planning notes kept outside the published source repository
 PRODUCT.md
 

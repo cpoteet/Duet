@@ -140,6 +140,18 @@ struct HostLifecycleTests {
         let filePickerSelector = NSSelectorFromString(
             "webView:runOpenPanelWithParameters:initiatedByFrame:completionHandler:"
         )
+        let responsePolicySelector = NSSelectorFromString(
+            "webView:decidePolicyForNavigationResponse:decisionHandler:"
+        )
+        let actionDownloadSelector = NSSelectorFromString(
+            "webView:navigationAction:didBecomeDownload:"
+        )
+        let responseDownloadSelector = NSSelectorFromString(
+            "webView:navigationResponse:didBecomeDownload:"
+        )
+        let downloadDestinationSelector = NSSelectorFromString(
+            "download:decideDestinationUsingResponse:suggestedFilename:completionHandler:"
+        )
         let browserController = BrowserController(service: .chatGPT)
         expect(
             browserController.prepare().underPageBackgroundColor.alphaComponent == 0,
@@ -148,6 +160,22 @@ struct HostLifecycleTests {
         expect(
             browserController.responds(to: filePickerSelector),
             "Browser controller should handle WebKit file-upload panels"
+        )
+        expect(
+            browserController.responds(to: responsePolicySelector),
+            "Browser controller should classify downloadable navigation responses"
+        )
+        expect(
+            browserController.responds(to: actionDownloadSelector),
+            "Browser controller should adopt action-initiated WebKit downloads"
+        )
+        expect(
+            browserController.responds(to: responseDownloadSelector),
+            "Browser controller should adopt response-initiated WebKit downloads"
+        )
+        expect(
+            browserController.responds(to: downloadDestinationSelector),
+            "Browser controller should choose destinations for WebKit downloads"
         )
 
         let workspaceState = AppState()

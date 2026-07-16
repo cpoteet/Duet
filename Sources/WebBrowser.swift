@@ -325,6 +325,13 @@ extension BrowserController: WKNavigationDelegate {
         decisionHandler: @escaping @MainActor (WKNavigationActionPolicy) -> Void
     ) {
         MainActor.assumeIsolated {
+            // Provider-generated files commonly use blob: URLs, which are not
+            // valid page destinations. Honor WebKit's explicit download signal
+            // before applying the normal provider-navigation allowlist.
+            if navigationAction.shouldPerformDownload {
+                decisionHandler(.download)
+                return
+            }
             if navigationAction.targetFrame?.isMainFrame == false {
                 decisionHandler(.allow)
                 return
@@ -339,6 +346,43 @@ extension BrowserController: WKNavigationDelegate {
                 decisionHandler(.cancel)
                 self.openExternalURLIfSafe(url)
             }
+        }
+    }
+
+    nonisolated func webView(
+        _ webView: WKWebView,
+        decidePolicyFor navigationResponse: WKNavigationResponse,
+        decisionHandler: @escaping @MainActor (WKNavigationResponsePolicy) -> Void
+    ) {
+        MainActor.assumeIsolated {
+            let contentDisposition = (navigationResponse.response as? HTTPURLResponse)?
+                .value(forHTTPHeaderField: "Content-Disposition")?
+                .lowercased()
+            if navigationResponse.canShowMIMEType == false || contentDisposition?.contains("attachment") == true {
+                decisionHandler(.download)
+            } else {
+                decisionHandler(.allow)
+            }
+        }
+    }
+
+    nonisolated func webView(
+        _ webView: WKWebView,
+        navigationAction: WKNavigationAction,
+        didBecome download: WKDownload
+    ) {
+        MainActor.assumeIsolated {
+            download.delegate = self
+        }
+    }
+
+    nonisolated func webView(
+        _ webView: WKWebView,
+        navigationResponse: WKNavigationResponse,
+        didBecome download: WKDownload
+    ) {
+        MainActor.assumeIsolated {
+            download.delegate = self
         }
     }
 
@@ -377,6 +421,82 @@ extension BrowserController: WKNavigationDelegate {
         NSWorkspace.shared.open(url)
     }
 
+}
+
+extension BrowserController: WKDownloadDelegate {
+    func download(
+        _ download: WKDownload,
+        decideDestinationUsing response: URLResponse,
+        suggestedFilename: String,
+        completionHandler: @escaping @MainActor (URL?) -> Void
+    ) {
+        let panel = NSSavePanel()
+        panel.canCreateDirectories = true
+        panel.nameFieldStringValue = Self.safeDownloadFilename(suggestedFilename)
+        panel.directoryURL = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first
+        panel.title = "Save Download"
+        panel.prompt = "Save"
+
+        let finish: @MainActor (NSApplication.ModalResponse) -> Void = { response in
+            guard response == .OK, let destination = panel.url else {
+                completionHandler(nil)
+                return
+            }
+
+            do {
+                // NSSavePanel already confirms replacement. WKDownload requires
+                // a destination URL that does not exist when downloading begins.
+                if FileManager.default.fileExists(atPath: destination.path) {
+                    try FileManager.default.removeItem(at: destination)
+                }
+                completionHandler(destination)
+            } catch {
+                completionHandler(nil)
+                self.presentDownloadError(error)
+            }
+        }
+
+        if let window = webView?.window ?? NSApp.keyWindow {
+            panel.beginSheetModal(for: window, completionHandler: finish)
+        } else {
+            finish(panel.runModal())
+        }
+    }
+
+    func download(
+        _ download: WKDownload,
+        didReceive challenge: URLAuthenticationChallenge,
+        completionHandler: @escaping @MainActor (URLSession.AuthChallengeDisposition, URLCredential?) -> Void
+    ) {
+        completionHandler(.performDefaultHandling, nil)
+    }
+
+    func download(
+        _ download: WKDownload,
+        didFailWithError error: Error,
+        resumeData: Data?
+    ) {
+        let nsError = error as NSError
+        guard !(nsError.domain == NSURLErrorDomain && nsError.code == NSURLErrorCancelled) else { return }
+        presentDownloadError(error)
+    }
+
+    private static func safeDownloadFilename(_ suggestedFilename: String) -> String {
+        let filename = URL(fileURLWithPath: suggestedFilename).lastPathComponent
+        return filename.isEmpty || filename == "." || filename == ".." ? "Download" : filename
+    }
+
+    private func presentDownloadError(_ error: Error) {
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = "Download Failed"
+        alert.informativeText = error.localizedDescription
+        if let window = webView?.window ?? NSApp.keyWindow {
+            alert.beginSheetModal(for: window)
+        } else {
+            alert.runModal()
+        }
+    }
 }
 
 extension BrowserController: WKUIDelegate {

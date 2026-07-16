@@ -30,13 +30,18 @@ struct ContentView: View {
         }
         .frame(minWidth: 900, minHeight: 650)
         .background(palette.canvas)
+        .background { WorkspaceWindowMarker() }
         .animation(.easeOut(duration: 0.2), value: appState.isSplitView)
         .onAppear {
             isComposerOpen = false
             appState.setKeepsProvidersLoaded(keepProvidersLoaded)
+            presentPendingDispatchNotice()
         }
         .onChange(of: keepProvidersLoaded) { _, isEnabled in
             appState.setKeepsProvidersLoaded(isEnabled)
+        }
+        .onChange(of: appState.dispatchNotice) { _, _ in
+            presentPendingDispatchNotice()
         }
         .onDisappear {
             toastDismissal?.cancel()
@@ -439,7 +444,6 @@ struct ContentView: View {
         guard canSend(to: target) else { return }
         Task {
             let results = await appState.send(to: target)
-            presentToast(for: results)
             if !results.isEmpty && results.allSatisfy(\.wasSent) {
                 isComposerOpen = false
             }
@@ -527,12 +531,12 @@ struct ContentView: View {
             let failed = failedResults[0]
             let successPrefix = sentServices.isEmpty ? "" : "Sent to \(sentServices.joined(separator: " and ")) · "
             let failures = failedResults
-                .map { "\($0.service.title): \($0.outcome.status.label)" }
+                .map { "\($0.service.title): \($0.outcome.label)" }
                 .joined(separator: " · ")
             nextToast = DispatchToast(
                 message: "\(successPrefix)\(failures)",
                 style: .error,
-                actionService: failed.service
+                actionService: failed.outcome.offersBrowserFallback ? failed.service : nil
             )
         }
 
@@ -553,6 +557,12 @@ struct ContentView: View {
                 toast = nil
             }
         }
+    }
+
+    private func presentPendingDispatchNotice() {
+        guard let notice = appState.dispatchNotice else { return }
+        presentToast(for: notice.results)
+        appState.consumeDispatchNotice(notice.id)
     }
 
     private func dismissToast() {

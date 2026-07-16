@@ -7,11 +7,9 @@ final class AppState: ObservableObject {
     @Published var isSplitView = false
     @Published private(set) var isLaunchChooserVisible = true
     @Published var prompt = ""
-    @Published private(set) var statuses: [ChatService: PromptDispatchStatus] = Dictionary(
-        uniqueKeysWithValues: ChatService.allCases.map { ($0, .idle) }
-    )
     @Published private(set) var activeDispatchServices: Set<ChatService> = []
     @Published private(set) var resettingServices: Set<ChatService> = []
+    @Published private(set) var dispatchNotice: DispatchNotice?
 
     private let browsers: [ChatService: BrowserController]
     private var keepsProvidersLoaded = false
@@ -49,7 +47,8 @@ final class AppState: ObservableObject {
               selectedService == service,
               let previous = pendingSinglePaneRelease else { return }
         pendingSinglePaneRelease = nil
-        browser(for: previous).release()
+        guard previous != selectedService else { return }
+        releaseInactiveBrowsersIfNeeded()
     }
 
     func setKeepsProvidersLoaded(_ enabled: Bool) {
@@ -60,9 +59,7 @@ final class AppState: ObservableObject {
         if enabled {
             ChatService.allCases.forEach { _ = browser(for: $0).prepare() }
         } else if !isSplitView {
-            ChatService.allCases
-                .filter { $0 != selectedService }
-                .forEach { browser(for: $0).release() }
+            releaseInactiveBrowsersIfNeeded()
         }
     }
 
@@ -78,11 +75,7 @@ final class AppState: ObservableObject {
             ChatService.allCases.forEach { _ = browser(for: $0).prepare() }
         } else {
             mountedSplitServices.removeAll()
-            if !keepsProvidersLoaded {
-                ChatService.allCases
-                    .filter { $0 != selectedService }
-                    .forEach { browser(for: $0).release() }
-            }
+            releaseInactiveBrowsersIfNeeded()
         }
     }
 
@@ -103,13 +96,16 @@ final class AppState: ObservableObject {
     /// Quick Prompt always starts new conversations. Recreate selected provider
     /// views first so an already-mounted conversation cannot interrupt the
     /// fresh-chat navigation while SwiftUI changes panes.
-    func openQuickPromptWorkspace(for target: PromptTarget) {
+    @discardableResult
+    func openQuickPromptWorkspace(for target: PromptTarget) -> Bool {
+        guard !hasActiveOperations else { return false }
         let recreatedServices = services(for: target)
         mountedSplitServices.subtract(recreatedServices)
         recreatedServices.forEach { service in
             browser(for: service).release()
         }
         openWorkspace(for: target)
+        return true
     }
 
     /// Lets a quick-prompt split transition finish moving both WebKit views
@@ -149,14 +145,18 @@ final class AppState: ObservableObject {
         let services = services(for: target)
         guard Set(services).isDisjoint(with: activeDispatchServices),
               Set(services).isDisjoint(with: resettingServices) else {
-            return services.map {
+            let results = services.map {
                 PromptDispatchResult(service: $0, outcome: .failed("A provider operation is already in progress"))
             }
+            dispatchNotice = DispatchNotice(results: results)
+            return results
         }
 
         activeDispatchServices.formUnion(services)
-        defer { activeDispatchServices.subtract(services) }
-        services.forEach { statuses[$0] = .sending }
+        defer {
+            activeDispatchServices.subtract(services)
+            releaseInactiveBrowsersIfNeeded()
+        }
 
         let outcomes: [PromptDispatchResult]
         if case .both = target {
@@ -185,17 +185,18 @@ final class AppState: ObservableObject {
             ]
         }
 
-        outcomes.forEach { statuses[$0.service] = $0.outcome.status }
+        dispatchNotice = DispatchNotice(results: outcomes)
         return outcomes
     }
 
     func clearWebsiteData(for service: ChatService) async {
         guard !activeDispatchServices.contains(service), !resettingServices.contains(service) else { return }
         resettingServices.insert(service)
-        defer { resettingServices.remove(service) }
-        statuses[service] = .sending
+        defer {
+            resettingServices.remove(service)
+            releaseInactiveBrowsersIfNeeded()
+        }
         await browser(for: service).clearWebsiteData()
-        statuses[service] = .idle
     }
 
     func canSend(to target: PromptTarget) -> Bool {
@@ -221,5 +222,17 @@ final class AppState: ObservableObject {
 
     var hasActiveOperations: Bool {
         !activeDispatchServices.isEmpty || !resettingServices.isEmpty
+    }
+
+    func consumeDispatchNotice(_ id: UUID) {
+        guard dispatchNotice?.id == id else { return }
+        dispatchNotice = nil
+    }
+
+    private func releaseInactiveBrowsersIfNeeded() {
+        guard !isSplitView, !keepsProvidersLoaded else { return }
+        ChatService.allCases
+            .filter { $0 != selectedService && !isBusy($0) }
+            .forEach { browser(for: $0).release() }
     }
 }

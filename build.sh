@@ -9,6 +9,8 @@ APP_BUNDLE="$DIST_DIR/$APP_NAME.app"
 EXECUTABLE="$APP_BUNDLE/Contents/MacOS/$APP_NAME"
 ICON_SOURCE="$ROOT/Resources/DuetIcon.png"
 ICONSET="$BUILD_DIR/Duet.iconset"
+INFO_PLIST="$ROOT/Resources/Info.plist"
+APP_VERSION=$(plutil -extract CFBundleShortVersionString raw "$INFO_PLIST")
 
 if pgrep -x "$APP_NAME" >/dev/null; then
   echo "Closing running $APP_NAME…"
@@ -46,7 +48,8 @@ for resource in "$ROOT"/Resources/*; do
   [[ "${resource:t}" == "Info.plist" ]] && continue
   cp -R "$resource" "$APP_BUNDLE/Contents/Resources/"
 done
-cp "$ROOT/Resources/Info.plist" "$APP_BUNDLE/Contents/Info.plist"
+cp "$INFO_PLIST" "$APP_BUNDLE/Contents/Info.plist"
+plutil -replace CFBundleVersion -string "$APP_VERSION" "$APP_BUNDLE/Contents/Info.plist"
 
 if [[ -f "$ICON_SOURCE" ]]; then
   mkdir -p "$ICONSET"

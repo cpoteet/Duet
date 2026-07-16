@@ -32,7 +32,7 @@ final class BrowserController: NSObject, ObservableObject {
         newWebView.allowsBackForwardNavigationGestures = true
         newWebView.navigationDelegate = self
         newWebView.uiDelegate = self
-        newWebView.setValue(false, forKey: "drawsBackground")
+        newWebView.underPageBackgroundColor = .clear
         webView = newWebView
         hasRetriedBlankInitialClaudeLoad = false
         return newWebView
@@ -85,9 +85,12 @@ final class BrowserController: NSObject, ObservableObject {
         } else {
             _ = acquire()
         }
-        let ready = await waitForComposer(timeout: timeout)
-        guard ready else {
-            if await isLoginRequired() { return .loginRequired }
+        switch await waitForComposer(timeout: timeout) {
+        case .ready:
+            break
+        case .loginRequired:
+            return .loginRequired
+        case .unavailable:
             return .unavailable
         }
 
@@ -95,14 +98,22 @@ final class BrowserController: NSObject, ObservableObject {
             guard service.allowsPromptInjection(at: webView?.url) else {
                 return .failed("Provider page is not active")
             }
+            let baselineMessageCount = try await evaluate(adapter.submissionBaselineScript(), as: Int.self)
             let result = try await evaluate(adapter.fillScript(prompt: prompt), as: ScriptResult.self)
             guard result.ok else {
                 if result.reason == "composer-not-found" {
                     return .unavailable
                 }
+                if result.reason == "composer-not-empty" {
+                    return .composerHasDraft
+                }
                 return .failed("Unexpected page response")
             }
-            return await waitForSubmission(prompt: prompt, timeout: 4)
+            return await waitForSubmission(
+                prompt: prompt,
+                baselineMessageCount: baselineMessageCount,
+                timeout: 4
+            )
         } catch {
             return .failed("Could not talk to page")
         }
@@ -137,18 +148,23 @@ final class BrowserController: NSObject, ObservableObject {
         _ = prepare()
     }
 
-    private func waitForComposer(timeout: TimeInterval) async -> Bool {
+    private func waitForComposer(timeout: TimeInterval) async -> ComposerReadiness {
         let deadline = Date().addingTimeInterval(timeout)
+        var nextLoginCheck = Date.distantPast
         while Date() < deadline {
-            if Task.isCancelled { return false }
-            if await hasComposer() { return true }
+            if Task.isCancelled { return .unavailable }
+            if await hasComposer() { return .ready }
+            if Date() >= nextLoginCheck {
+                if await isLoginRequired() { return .loginRequired }
+                nextLoginCheck = Date().addingTimeInterval(0.9)
+            }
             do {
                 try await Task.sleep(for: .milliseconds(300))
             } catch {
-                return false
+                return .unavailable
             }
         }
-        return false
+        return await isLoginRequired() ? .loginRequired : .unavailable
     }
 
     private func startInitialNavigationIfNeeded(in webView: WKWebView) {
@@ -163,7 +179,10 @@ final class BrowserController: NSObject, ObservableObject {
     }
 
     private func isLoginRequired() async -> Bool {
-        (try? await evaluate(adapter.loginRequiredScript(), as: Bool.self)) ?? false
+        guard let url = webView?.url else { return false }
+        if service.isAuthenticationPage(url) { return true }
+        guard service.allowsPromptInjection(at: url) else { return false }
+        return (try? await evaluate(adapter.loginRequiredScript(), as: Bool.self)) ?? false
     }
 
     /// Cloudflare can complete a navigation while showing no usable app UI in an
@@ -212,7 +231,11 @@ final class BrowserController: NSObject, ObservableObject {
         loadedWebView.reload()
     }
 
-    private func waitForSubmission(prompt: String, timeout: TimeInterval) async -> PromptDispatchOutcome {
+    private func waitForSubmission(
+        prompt: String,
+        baselineMessageCount: Int,
+        timeout: TimeInterval
+    ) async -> PromptDispatchOutcome {
         let deadline = Date().addingTimeInterval(timeout)
         var didClickSend = false
         while Date() < deadline {
@@ -222,7 +245,13 @@ final class BrowserController: NSObject, ObservableObject {
                     return .failed("Provider page changed before sending")
                 }
                 if didClickSend {
-                    if try await evaluate(adapter.submissionConfirmationScript(prompt: prompt), as: Bool.self) {
+                    if try await evaluate(
+                        adapter.submissionConfirmationScript(
+                            prompt: prompt,
+                            baselineMessageCount: baselineMessageCount
+                        ),
+                        as: Bool.self
+                    ) {
                         return .sent
                     }
                 } else {
@@ -270,6 +299,12 @@ final class BrowserController: NSObject, ObservableObject {
 private enum BrowserError: Error {
     case webViewUnavailable
     case invalidJavaScriptResult
+}
+
+private enum ComposerReadiness {
+    case ready
+    case loginRequired
+    case unavailable
 }
 
 private struct ScriptResult: Decodable, Sendable {
@@ -389,13 +424,15 @@ extension BrowserController: WKUIDelegate {
 final class BrowserHostView: NSView {
     private var hostedWebView: WKWebView?
     private var acceptsKeyboardInput = true
+    private var windowAttachmentTask: Task<Void, Never>?
     var onWindowAttachment: (() -> Void)?
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
         if window != nil {
-            resignHostedFirstResponderIfNeeded()
-            onWindowAttachment?()
+            scheduleWindowAttachment()
+        } else {
+            windowAttachmentTask?.cancel()
         }
     }
 
@@ -415,6 +452,8 @@ final class BrowserHostView: NSView {
     }
 
     func clear() {
+        windowAttachmentTask?.cancel()
+        windowAttachmentTask = nil
         // During a switch from a single pane to split view, SwiftUI may move
         // this WKWebView into its replacement host before dismantling this
         // host. Only remove a view we still own; otherwise the old host tears
@@ -423,6 +462,19 @@ final class BrowserHostView: NSView {
             hostedWebView?.removeFromSuperview()
         }
         hostedWebView = nil
+    }
+
+    /// AppKit can attach or update this host while SwiftUI is still rendering.
+    /// Defer activation and mount bookkeeping to the next main-actor turn so
+    /// those callbacks never publish observable state from `updateNSView`.
+    func scheduleWindowAttachment() {
+        windowAttachmentTask?.cancel()
+        windowAttachmentTask = Task { @MainActor [weak self] in
+            await Task.yield()
+            guard !Task.isCancelled, let self, self.window != nil else { return }
+            self.resignHostedFirstResponderIfNeeded()
+            self.onWindowAttachment?()
+        }
     }
 
     private func resignHostedFirstResponderIfNeeded() {
@@ -453,8 +505,7 @@ struct BrowserView: NSViewRepresentable {
         nsView.install(browser.prepare())
         nsView.setAcceptsKeyboardInput(acceptsKeyboardInput)
         if nsView.window != nil {
-            browser.activateWhenHosted()
-            onMounted()
+            nsView.scheduleWindowAttachment()
         }
     }
 

@@ -61,8 +61,19 @@ struct ProviderAdapter {
     func loginRequiredScript() -> String {
         """
         (() => {
-          const text = (document.body?.innerText || '').toLowerCase();
-          return text.includes('log in') || text.includes('sign in') || text.includes('continue with google');
+          const isVisible = element => element && element.getClientRects().length > 0 && !element.closest('[aria-hidden="true"]');
+          const normalize = text => text.replace(/\\s+/g, ' ').trim().toLowerCase();
+          const loginLabels = new Set([
+            'log in', 'login', 'sign in', 'sign in with google', 'continue with google',
+            'continue with apple', 'continue with microsoft', 'continue with email'
+          ]);
+          return Array.from(document.querySelectorAll('a, button, [role="button"], form')).some(element => {
+            if (!isVisible(element)) return false;
+            const destination = (element.getAttribute('href') || element.getAttribute('action') || '').toLowerCase();
+            if (/(^|\\/)(login|signin|sign-in)([\\/?#]|$)/.test(destination)) return true;
+            const label = element.getAttribute('aria-label') || element.innerText || element.textContent || '';
+            return loginLabels.has(normalize(label));
+          });
         })()
         """
     }
@@ -78,6 +89,11 @@ struct ProviderAdapter {
           const isVisible = element => element && element.getClientRects().length > 0 && !element.closest('[aria-hidden="true"]');
           const composer = composerSelectors.map(selector => document.querySelector(selector)).find(isVisible);
           if (!composer) return { ok: false, reason: 'composer-not-found' };
+
+          const existingText = composer instanceof HTMLTextAreaElement || composer instanceof HTMLInputElement
+            ? composer.value
+            : composer.innerText || composer.textContent || '';
+          if (existingText.trim().length > 0) return { ok: false, reason: 'composer-not-empty' };
 
           composer.focus();
           if (composer instanceof HTMLTextAreaElement || composer instanceof HTMLInputElement) {
@@ -123,22 +139,26 @@ struct ProviderAdapter {
         """
     }
 
-    func submissionConfirmationScript(prompt: String) -> String {
+    func submissionBaselineScript() -> String {
+        """
+        (() => {
+          const userMessageSelectors = \(jsonArray(userMessageSelectors));
+          return userMessageSelectors.flatMap(selector => Array.from(document.querySelectorAll(selector))).length;
+        })()
+        """
+    }
+
+    func submissionConfirmationScript(prompt: String, baselineMessageCount: Int) -> String {
         let encodedPrompt = jsonString(prompt)
         return """
         (() => {
-          const prompt = \(encodedPrompt).trim();
-          const composerSelectors = \(jsonArray(composerSelectors));
+          const normalize = text => text.replace(/\\s+/g, ' ').trim();
+          const prompt = normalize(\(encodedPrompt));
           const userMessageSelectors = \(jsonArray(userMessageSelectors));
-          const composer = composerSelectors.map(selector => document.querySelector(selector)).find(Boolean);
-          const composerText = composer
-            ? (composer instanceof HTMLTextAreaElement || composer instanceof HTMLInputElement ? composer.value : composer.innerText || composer.textContent || '')
-            : '';
-          if (!composer || composerText.trim().length === 0) return true;
-
           const messages = userMessageSelectors.flatMap(selector => Array.from(document.querySelectorAll(selector)));
-          return messages.slice(-5).some(message => {
-            const text = (message.innerText || message.textContent || '').trim();
+          if (messages.length <= \(baselineMessageCount)) return false;
+          return messages.slice(\(baselineMessageCount)).some(message => {
+            const text = normalize(message.innerText || message.textContent || '');
             return text === prompt || text.includes(prompt);
           });
         })()

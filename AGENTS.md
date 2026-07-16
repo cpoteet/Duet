@@ -15,12 +15,14 @@ Duet is a personal Apple Silicon macOS 15+ app for using ChatGPT and Claude in a
 - Build with `./build.sh`. It closes a running Duet instance, compiles using the local `swiftc` toolchain, assembles and ad-hoc signs `dist/Duet.app`, then launches the fresh build.
 - Test with `./test.sh`.
 - Before handing off a release, verify the app bundle metadata and ad-hoc signature, then smoke-test the built app when practical.
+- Keep `CFBundleShortVersionString` and `CFBundleVersion` aligned for each release; `build.sh` also enforces the marketing version in the assembled bundle.
 
 ## App behavior
 
 - Load ChatGPT at `https://www.chatgpt.com` and Claude at `https://claude.ai` in persistent WebKit website-data stores so sessions normally survive relaunches.
 - Default to one active provider; split view is on demand. Release inactive web views in single-pane mode to reduce memory while retaining website session data, unless the user enables Keep both providers loaded for faster switching.
 - Quick Prompt is available globally with Control–Option–Space and from Tools → Quick Prompt. It sends to ChatGPT, Claude, or Both, always starts a fresh conversation for each selected provider, and brings the workspace forward for continued interaction.
+- Keep the primary workspace in its `WindowGroup` so Quick Prompt can reopen it after the window closes. Identify the workspace with its stable `NSWindow.identifier`; do not locate it by title or fall back to unrelated windows.
 - The shared native prompt drawer is text-only, collapsed by default, stays open until explicitly closed, and provides Send to Current and Send to Both.
 - Sending fills each provider's composer, waits for its reactive send control, then invokes it. Show independent provider statuses and never auto-retry an ambiguous submission.
 - Keep response viewing, history, attachments, and provider-specific features in the provider pages. Do not scrape or merge provider responses.

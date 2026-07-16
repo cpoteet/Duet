@@ -9,6 +9,7 @@ private enum IntegrationTestError: Error {
 
 private struct ScriptResult: Decodable, Sendable {
     let ok: Bool
+    let reason: String?
 }
 
 @MainActor
@@ -77,6 +78,35 @@ struct HostLifecycleTests {
             "Old host removed a WKWebView after it moved to the split-pane host"
         )
 
+        let mountWindow = NSWindow(
+            contentRect: .init(x: 0, y: 0, width: 400, height: 400),
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        let mountHost = BrowserHostView(frame: mountWindow.contentView?.bounds ?? .zero)
+        var mountNotificationCount = 0
+        mountHost.onWindowAttachment = { mountNotificationCount += 1 }
+        mountWindow.contentView = mountHost
+        mountHost.scheduleWindowAttachment()
+        mountHost.scheduleWindowAttachment()
+        expect(
+            mountNotificationCount == 0,
+            "Browser host mount callbacks must not run during the current SwiftUI update"
+        )
+        try? await Task.sleep(for: .milliseconds(20))
+        expect(
+            mountNotificationCount == 1,
+            "Repeated browser host updates should coalesce into one mount callback"
+        )
+        mountHost.scheduleWindowAttachment()
+        mountHost.clear()
+        try? await Task.sleep(for: .milliseconds(20))
+        expect(
+            mountNotificationCount == 1,
+            "A dismantled browser host must cancel its pending mount callback"
+        )
+
         let focusWindow = NSWindow(
             contentRect: .init(x: 0, y: 0, width: 400, height: 400),
             styleMask: [.titled],
@@ -95,10 +125,26 @@ struct HostLifecycleTests {
             "An inactive retained pane should resign keyboard focus"
         )
 
+        let identifiedWorkspaceWindow = NSWindow(
+            contentRect: .init(x: 0, y: 0, width: 400, height: 400),
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        identifiedWorkspaceWindow.contentView = WorkspaceWindowMarkerView(frame: .zero)
+        expect(
+            identifiedWorkspaceWindow.identifier == DuetWindowIdentifier.workspace,
+            "The workspace marker should assign the stable workspace window identifier"
+        )
+
         let filePickerSelector = NSSelectorFromString(
             "webView:runOpenPanelWithParameters:initiatedByFrame:completionHandler:"
         )
         let browserController = BrowserController(service: .chatGPT)
+        expect(
+            browserController.prepare().underPageBackgroundColor.alphaComponent == 0,
+            "Provider web views should use the supported transparent background property"
+        )
         expect(
             browserController.responds(to: filePickerSelector),
             "Browser controller should handle WebKit file-upload panels"
@@ -171,6 +217,8 @@ struct HostLifecycleTests {
                 failures: &failures
             )
             try await testDelayedSend(failures: &failures)
+            try await testRepeatedPromptConfirmation(failures: &failures)
+            try await testExistingDraftProtection(failures: &failures)
             try await testSignedOutFixture(failures: &failures)
         } catch {
             failures.append("Fixture integration test threw: \(error)")
@@ -202,11 +250,16 @@ struct HostLifecycleTests {
         let ready: Bool = try await evaluate(adapter.readinessScript(), in: webView)
         expect(ready, "\(name) composer was not detected", failures: &failures)
 
+        let baselineMessageCount: Int = try await evaluate(adapter.submissionBaselineScript(), in: webView)
+
         let fill: ScriptResult = try await evaluate(adapter.fillScript(prompt: prompt), in: webView)
         expect(fill.ok, "\(name) composer was not filled", failures: &failures)
 
         let beforeClick: Bool = try await evaluate(
-            adapter.submissionConfirmationScript(prompt: prompt),
+            adapter.submissionConfirmationScript(
+                prompt: prompt,
+                baselineMessageCount: baselineMessageCount
+            ),
             in: webView
         )
         expect(!beforeClick, "\(name) reported submission before click", failures: &failures)
@@ -215,7 +268,10 @@ struct HostLifecycleTests {
         expect(submit.ok, "\(name) send control was not clicked", failures: &failures)
 
         let confirmed: Bool = try await evaluate(
-            adapter.submissionConfirmationScript(prompt: prompt),
+            adapter.submissionConfirmationScript(
+                prompt: prompt,
+                baselineMessageCount: baselineMessageCount
+            ),
             in: webView
         )
         expect(confirmed, "\(name) submission was not confirmed", failures: &failures)
@@ -232,6 +288,7 @@ struct HostLifecycleTests {
 
         let adapter = ProviderAdapter.adapter(for: .claude)
         let prompt = "Delayed prompt"
+        let baselineMessageCount: Int = try await evaluate(adapter.submissionBaselineScript(), in: webView)
         _ = try await evaluate(adapter.fillScript(prompt: prompt), in: webView) as ScriptResult
 
         let early: ScriptResult = try await evaluate(adapter.submissionScript(), in: webView)
@@ -241,10 +298,109 @@ struct HostLifecycleTests {
         let submit: ScriptResult = try await evaluate(adapter.submissionScript(), in: webView)
         expect(submit.ok, "Delayed send control never became ready", failures: &failures)
         let confirmed: Bool = try await evaluate(
-            adapter.submissionConfirmationScript(prompt: prompt),
+            adapter.submissionConfirmationScript(
+                prompt: prompt,
+                baselineMessageCount: baselineMessageCount
+            ),
             in: webView
         )
         expect(confirmed, "Delayed submission was not confirmed", failures: &failures)
+    }
+
+    @MainActor
+    private static func testRepeatedPromptConfirmation(failures: inout [String]) async throws {
+        let (webView, loader) = makeFixtureWebView()
+        defer {
+            webView.navigationDelegate = nil
+            webView.stopLoading()
+        }
+        try await loader.load(fixtureURL("textarea.html"), in: webView)
+
+        let adapter = ProviderAdapter.adapter(for: .chatGPT)
+        let prompt = "Repeated prompt"
+        _ = try await evaluate(
+            """
+            (() => {
+              const message = document.createElement('div');
+              message.dataset.messageAuthorRole = 'user';
+              message.textContent = "Repeated prompt";
+              document.body.appendChild(message);
+              return true;
+            })()
+            """,
+            in: webView
+        ) as Bool
+        let baselineMessageCount: Int = try await evaluate(adapter.submissionBaselineScript(), in: webView)
+        _ = try await evaluate(adapter.fillScript(prompt: prompt), in: webView) as ScriptResult
+
+        let oldMessageConfirmed: Bool = try await evaluate(
+            adapter.submissionConfirmationScript(
+                prompt: prompt,
+                baselineMessageCount: baselineMessageCount
+            ),
+            in: webView
+        )
+        expect(!oldMessageConfirmed, "An older repeated prompt must not confirm a new submission", failures: &failures)
+
+        _ = try await evaluate(
+            """
+            (() => {
+              document.querySelector('textarea').value = '';
+              return true;
+            })()
+            """,
+            in: webView
+        ) as Bool
+        let clearedComposerConfirmed: Bool = try await evaluate(
+            adapter.submissionConfirmationScript(
+                prompt: prompt,
+                baselineMessageCount: baselineMessageCount
+            ),
+            in: webView
+        )
+        expect(!clearedComposerConfirmed, "An empty composer alone must not confirm submission", failures: &failures)
+
+        _ = try await evaluate(adapter.fillScript(prompt: prompt), in: webView) as ScriptResult
+        let submit: ScriptResult = try await evaluate(adapter.submissionScript(), in: webView)
+        expect(submit.ok, "Repeated prompt send control was not clicked", failures: &failures)
+        let newMessageConfirmed: Bool = try await evaluate(
+            adapter.submissionConfirmationScript(
+                prompt: prompt,
+                baselineMessageCount: baselineMessageCount
+            ),
+            in: webView
+        )
+        expect(newMessageConfirmed, "A newly added repeated prompt should confirm submission", failures: &failures)
+    }
+
+    @MainActor
+    private static func testExistingDraftProtection(failures: inout [String]) async throws {
+        let (webView, loader) = makeFixtureWebView()
+        defer {
+            webView.navigationDelegate = nil
+            webView.stopLoading()
+        }
+        try await loader.load(fixtureURL("textarea.html"), in: webView)
+
+        _ = try await evaluate(
+            """
+            (() => {
+              document.querySelector('textarea').value = "Existing provider draft";
+              return true;
+            })()
+            """,
+            in: webView
+        ) as Bool
+        let adapter = ProviderAdapter.adapter(for: .chatGPT)
+        let fill: ScriptResult = try await evaluate(adapter.fillScript(prompt: "Replacement prompt"), in: webView)
+        expect(!fill.ok, "A provider draft should block native prompt replacement", failures: &failures)
+        expect(fill.reason == "composer-not-empty", "Draft protection should return its specific reason", failures: &failures)
+
+        let preservedDraft: String = try await evaluate(
+            "document.querySelector('textarea').value",
+            in: webView
+        )
+        expect(preservedDraft == "Existing provider draft", "A blocked native prompt must preserve the provider draft", failures: &failures)
     }
 
     @MainActor
@@ -259,6 +415,15 @@ struct HostLifecycleTests {
         let adapter = ProviderAdapter.adapter(for: .chatGPT)
         let loginRequired: Bool = try await evaluate(adapter.loginRequiredScript(), in: webView)
         expect(loginRequired, "Signed-out fixture was not recognized", failures: &failures)
+
+        let (discussionWebView, discussionLoader) = makeFixtureWebView()
+        defer {
+            discussionWebView.navigationDelegate = nil
+            discussionWebView.stopLoading()
+        }
+        try await discussionLoader.load(fixtureURL("login-discussion.html"), in: discussionWebView)
+        let discussionRequiresLogin: Bool = try await evaluate(adapter.loginRequiredScript(), in: discussionWebView)
+        expect(!discussionRequiresLogin, "Conversation text should not be mistaken for a sign-in screen", failures: &failures)
     }
 
     @MainActor

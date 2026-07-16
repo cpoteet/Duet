@@ -100,10 +100,7 @@ private final class QuickPromptPanelController: NSObject, NSWindowDelegate {
     }
 
     private func workspaceWindow() -> NSWindow? {
-        let windows = NSApp.windows.filter { $0 !== panel && !($0 is NSPanel) }
-        let workspaceWindows = windows.filter { $0.title == "Duet" }
-        let candidates = workspaceWindows.isEmpty ? windows : workspaceWindows
-        return candidates.first { $0.isVisible || $0.isMiniaturized } ?? candidates.last
+        NSApp.windows.first { $0.identifier == DuetWindowIdentifier.workspace }
     }
 
     private func focusReopenedWorkspace(attemptsRemaining: Int = 20) {
@@ -221,14 +218,14 @@ private struct QuickPromptView: View {
 
     private func canSend(to target: QuickPromptTarget) -> Bool {
         !prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            && appState.canSend(to: target.promptTarget)
+            && !appState.hasActiveOperations
     }
 
     private func send(to target: QuickPromptTarget) {
         let text = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
 
-        appState.openQuickPromptWorkspace(for: target.promptTarget)
+        guard appState.openQuickPromptWorkspace(for: target.promptTarget) else { return }
         dismiss()
         revealWorkspace()
 

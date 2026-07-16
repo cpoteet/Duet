@@ -32,6 +32,7 @@ xcrun swiftc \
   "$ROOT/Sources/ProviderAdapter.swift" \
   "$ROOT/Sources/WebBrowser.swift" \
   "$ROOT/Sources/AppState.swift" \
+  "$ROOT/Sources/WindowIdentity.swift" \
   "$ROOT/Tests/HostLifecycleTests.swift" \
   -o "$BUILD_DIR/HostLifecycleTests"
 
@@ -45,4 +46,11 @@ if [[ -z "$MICROPHONE_USAGE_DESCRIPTION" ]]; then
   exit 1
 fi
 
-echo "Bundle privacy metadata tests passed."
+MARKETING_VERSION=$(plutil -extract CFBundleShortVersionString raw "$ROOT/Resources/Info.plist")
+BUILD_VERSION=$(plutil -extract CFBundleVersion raw "$ROOT/Resources/Info.plist")
+if [[ "$BUILD_VERSION" != "$MARKETING_VERSION" ]]; then
+  echo "CFBundleVersion must match CFBundleShortVersionString for release builds." >&2
+  exit 1
+fi
+
+echo "Bundle metadata tests passed."

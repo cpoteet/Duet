@@ -42,6 +42,13 @@ enum ChatService: String, CaseIterable, Identifiable, Hashable {
         }
     }
 
+    private var providerAuthenticationHosts: [String] {
+        switch self {
+        case .chatGPT: ["auth.openai.com"]
+        case .claude: ["auth.anthropic.com"]
+        }
+    }
+
     private var authenticationHosts: [String] {
         [
             "accounts.google.com",
@@ -61,6 +68,16 @@ enum ChatService: String, CaseIterable, Identifiable, Hashable {
     func allowsPromptInjection(at url: URL?) -> Bool {
         guard url?.scheme?.lowercased() == "https", let host = url?.host?.lowercased() else { return false }
         return promptHosts.contains { hostMatches(host, domain: $0) }
+    }
+
+    func isAuthenticationPage(_ url: URL?) -> Bool {
+        guard url?.scheme?.lowercased() == "https", let host = url?.host?.lowercased() else { return false }
+        if (providerAuthenticationHosts + authenticationHosts).contains(where: { hostMatches(host, domain: $0) }) {
+            return true
+        }
+        guard promptHosts.contains(where: { hostMatches(host, domain: $0) }) else { return false }
+        guard let firstPathComponent = url?.path.split(separator: "/").first?.lowercased() else { return false }
+        return ["auth", "login", "signin", "sign-in"].contains(firstPathComponent)
     }
 
     private func hostMatches(_ host: String, domain: String) -> Bool {
@@ -84,38 +101,27 @@ enum BrowserPhase: Equatable {
     case failed(String)
 }
 
-enum PromptDispatchStatus: Equatable {
-    case idle
-    case sending
-    case sent
-    case loginRequired
-    case unavailable
-    case failed(String)
-
-    var label: String {
-        switch self {
-        case .idle: "Ready"
-        case .sending: "Sending…"
-        case .sent: "Sent"
-        case .loginRequired: "Sign in required"
-        case .unavailable: "Page not ready"
-        case .failed(let message): message
-        }
-    }
-}
-
 enum PromptDispatchOutcome: Equatable {
     case sent
     case loginRequired
     case unavailable
+    case composerHasDraft
     case failed(String)
 
-    var status: PromptDispatchStatus {
+    var label: String {
         switch self {
-        case .sent: .sent
-        case .loginRequired: .loginRequired
-        case .unavailable: .unavailable
-        case .failed(let message): .failed(message)
+        case .sent: "Sent"
+        case .loginRequired: "Sign in required"
+        case .unavailable: "Page not ready"
+        case .composerHasDraft: "Composer already has a draft"
+        case .failed(let message): message
+        }
+    }
+
+    var offersBrowserFallback: Bool {
+        switch self {
+        case .sent, .composerHasDraft: false
+        case .loginRequired, .unavailable, .failed: true
         }
     }
 
@@ -130,6 +136,11 @@ struct PromptDispatchResult: Equatable {
     let outcome: PromptDispatchOutcome
 
     var wasSent: Bool { outcome.wasSent }
+}
+
+struct DispatchNotice: Identifiable, Equatable {
+    let id = UUID()
+    let results: [PromptDispatchResult]
 }
 
 enum PromptTarget {

@@ -78,6 +78,29 @@ struct HostLifecycleTests {
             "Old host removed a WKWebView after it moved to the split-pane host"
         )
 
+        weak var releasedWebView: WKWebView?
+        autoreleasepool {
+            let releaseHost = BrowserHostView(frame: .init(x: 0, y: 0, width: 400, height: 400))
+            let releaseBrowser = BrowserController(service: .chatGPT)
+            let webView = releaseBrowser.prepare()
+            releasedWebView = webView
+            releaseHost.install(webView)
+            releaseBrowser.release()
+        }
+        expect(
+            releasedWebView == nil,
+            "A cached browser host must not retain a web view after its controller releases it"
+        )
+
+        let staleHostBrowser = BrowserController(service: .chatGPT)
+        _ = staleHostBrowser.prepare()
+        staleHostBrowser.release()
+        staleHostBrowser.activateWhenHosted()
+        expect(
+            staleHostBrowser.webView == nil,
+            "A stale host callback must not recreate a released provider web view"
+        )
+
         let mountWindow = NSWindow(
             contentRect: .init(x: 0, y: 0, width: 400, height: 400),
             styleMask: [.titled],
@@ -125,6 +148,17 @@ struct HostLifecycleTests {
             "An inactive retained pane should resign keyboard focus"
         )
 
+        let detachedFocusHost = BrowserHostView(frame: focusWindow.contentView?.bounds ?? .zero)
+        let detachedFocusedWebView = WKWebView(frame: detachedFocusHost.bounds, configuration: WKWebViewConfiguration())
+        focusWindow.contentView = detachedFocusHost
+        detachedFocusHost.install(detachedFocusedWebView)
+        let acceptedDetachedWebViewFocus = focusWindow.makeFirstResponder(detachedFocusedWebView)
+        expect(acceptedDetachedWebViewFocus, "Host-detachment focus test could not focus its web view")
+        detachedFocusHost.clear()
+        expect(
+            focusWindow.firstResponder !== detachedFocusedWebView,
+            "A browser host must resign its web view before detaching it from the window"
+        )
         let identifiedWorkspaceWindow = NSWindow(
             contentRect: .init(x: 0, y: 0, width: 400, height: 400),
             styleMask: [.titled],
@@ -177,7 +211,6 @@ struct HostLifecycleTests {
             browserController.responds(to: downloadDestinationSelector),
             "Browser controller should choose destinations for WebKit downloads"
         )
-
         let workspaceState = AppState()
         expect(workspaceState.isLaunchChooserVisible, "Workspace should begin at the tool chooser")
         workspaceState.openWorkspace(for: .service(.claude))
@@ -186,10 +219,10 @@ struct HostLifecycleTests {
         expect(!workspaceState.isSplitView, "A single-provider destination should use one pane")
         let releasableClaudeView = workspaceState.browser(for: .claude).webView
         workspaceState.openWorkspace(for: .service(.chatGPT))
-        workspaceState.browserDidMount(.chatGPT)
+        try? await Task.sleep(for: .milliseconds(350))
         expect(
             releasableClaudeView != nil && workspaceState.browser(for: .claude).webView == nil,
-            "The default single-pane mode should release its inactive web view"
+            "The default single-pane mode should release its inactive web view after the UI transition"
         )
         workspaceState.setKeepsProvidersLoaded(true)
         workspaceState.openWorkspace(for: .service(.claude))
@@ -214,9 +247,10 @@ struct HostLifecycleTests {
             "Leaving split view should retain the inactive provider when faster switching is enabled"
         )
         workspaceState.setKeepsProvidersLoaded(false)
+        try? await Task.sleep(for: .milliseconds(350))
         expect(
             workspaceState.browser(for: .chatGPT).webView == nil,
-            "Turning faster switching off should immediately release the inactive provider"
+            "Turning faster switching off should release the inactive provider after the UI transition"
         )
         workspaceState.openQuickPromptWorkspace(for: .both)
         expect(workspaceState.isSplitView, "Quick Prompt Both destination should use a fresh split workspace")

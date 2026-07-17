@@ -47,7 +47,7 @@ final class BrowserController: NSObject, ObservableObject {
     }
 
     func activateWhenHosted() {
-        let webView = prepare()
+        guard let webView else { return }
         guard webView.superview?.window != nil else { return }
         startInitialNavigationIfNeeded(in: webView)
     }
@@ -58,6 +58,14 @@ final class BrowserController: NSObject, ObservableObject {
         webView.removeFromSuperview()
         webView.navigationDelegate = nil
         webView.uiDelegate = nil
+        // WKWebView has no public close API. Duet is a personal, non-App Store
+        // app, so use WebKit's guarded close selector to destroy the discarded
+        // page proxy. Persistent website data is stored separately and survives
+        // the view teardown.
+        let closeSelector = NSSelectorFromString("_close")
+        if webView.responds(to: closeSelector) {
+            webView.perform(closeSelector)
+        }
         self.webView = nil
         phase = .unloaded
     }
@@ -542,7 +550,10 @@ extension BrowserController: WKUIDelegate {
 }
 
 final class BrowserHostView: NSView {
-    private var hostedWebView: WKWebView?
+    // The browser controller owns the web view. The host only tracks the view
+    // while it is mounted so a cached SwiftUI host cannot keep a released
+    // provider page and its WebContent process alive.
+    private weak var hostedWebView: WKWebView?
     private var acceptsKeyboardInput = true
     private var windowAttachmentTask: Task<Void, Never>?
     var onWindowAttachment: (() -> Void)?
@@ -556,8 +567,16 @@ final class BrowserHostView: NSView {
         }
     }
 
+    override func viewWillMove(toWindow newWindow: NSWindow?) {
+        if newWindow == nil {
+            prepareHostedWebViewForDetachment()
+        }
+        super.viewWillMove(toWindow: newWindow)
+    }
+
     func install(_ webView: WKWebView) {
         guard hostedWebView !== webView else { return }
+        prepareHostedWebViewForDetachment()
         hostedWebView?.removeFromSuperview()
         hostedWebView = webView
         webView.frame = bounds
@@ -579,6 +598,7 @@ final class BrowserHostView: NSView {
         // host. Only remove a view we still own; otherwise the old host tears
         // the visible split-pane view back out of its new parent.
         if hostedWebView?.superview === self {
+            prepareHostedWebViewForDetachment()
             hostedWebView?.removeFromSuperview()
         }
         hostedWebView = nil
@@ -598,8 +618,17 @@ final class BrowserHostView: NSView {
     }
 
     private func resignHostedFirstResponderIfNeeded() {
-        guard !acceptsKeyboardInput,
-              let hostedWebView,
+        guard !acceptsKeyboardInput else { return }
+        resignHostedFirstResponder()
+    }
+
+    private func prepareHostedWebViewForDetachment() {
+        guard let hostedWebView, hostedWebView.superview === self else { return }
+        resignHostedFirstResponder()
+    }
+
+    private func resignHostedFirstResponder() {
+        guard let hostedWebView,
               let window,
               let firstResponder = window.firstResponder as? NSView,
               firstResponder === hostedWebView || firstResponder.isDescendant(of: hostedWebView) else { return }
@@ -615,14 +644,20 @@ struct BrowserView: NSViewRepresentable {
     func makeNSView(context: Context) -> BrowserHostView {
         let host = BrowserHostView()
         configure(host)
-        host.install(browser.prepare())
+        if let webView = browser.webView {
+            host.install(webView)
+        }
         host.setAcceptsKeyboardInput(acceptsKeyboardInput)
         return host
     }
 
     func updateNSView(_ nsView: BrowserHostView, context: Context) {
         configure(nsView)
-        nsView.install(browser.prepare())
+        if let webView = browser.webView {
+            nsView.install(webView)
+        } else {
+            nsView.clear()
+        }
         nsView.setAcceptsKeyboardInput(acceptsKeyboardInput)
         if nsView.window != nil {
             nsView.scheduleWindowAttachment()

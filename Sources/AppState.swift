@@ -13,8 +13,8 @@ final class AppState: ObservableObject {
 
     private let browsers: [ChatService: BrowserController]
     private var keepsProvidersLoaded = false
-    private var pendingSinglePaneRelease: ChatService?
     private var mountedSplitServices: Set<ChatService> = []
+    private var inactiveBrowserReleaseTask: Task<Void, Never>?
 
     init() {
         browsers = Dictionary(uniqueKeysWithValues: ChatService.allCases.map { ($0, BrowserController(service: $0)) })
@@ -31,35 +31,27 @@ final class AppState: ObservableObject {
         _ = browser(for: service).prepare()
         selectedService = service
         if !isSplitView, !keepsProvidersLoaded, previous != service {
-            pendingSinglePaneRelease = previous
+            scheduleInactiveBrowserRelease()
         }
     }
 
-    /// Tracks split-pane mounting and releases the previous single-pane browser
-    /// only after its replacement belongs to the visible window.
+    /// Tracks split-pane mounting for quick-prompt dispatch readiness.
     func browserDidMount(_ service: ChatService) {
         if isSplitView {
             mountedSplitServices.insert(service)
-            return
         }
-
-        guard !keepsProvidersLoaded,
-              selectedService == service,
-              let previous = pendingSinglePaneRelease else { return }
-        pendingSinglePaneRelease = nil
-        guard previous != selectedService else { return }
-        releaseInactiveBrowsersIfNeeded()
     }
 
     func setKeepsProvidersLoaded(_ enabled: Bool) {
         guard keepsProvidersLoaded != enabled else { return }
         keepsProvidersLoaded = enabled
-        pendingSinglePaneRelease = nil
 
         if enabled {
+            inactiveBrowserReleaseTask?.cancel()
+            inactiveBrowserReleaseTask = nil
             ChatService.allCases.forEach { _ = browser(for: $0).prepare() }
         } else if !isSplitView {
-            releaseInactiveBrowsersIfNeeded()
+            scheduleInactiveBrowserRelease()
         }
     }
 
@@ -68,14 +60,15 @@ final class AppState: ObservableObject {
         let wasSplitView = isSplitView
         isSplitView = enabled
         if enabled {
-            pendingSinglePaneRelease = nil
+            inactiveBrowserReleaseTask?.cancel()
+            inactiveBrowserReleaseTask = nil
             if !wasSplitView {
                 mountedSplitServices.removeAll()
             }
             ChatService.allCases.forEach { _ = browser(for: $0).prepare() }
         } else {
             mountedSplitServices.removeAll()
-            releaseInactiveBrowsersIfNeeded()
+            scheduleInactiveBrowserRelease()
         }
     }
 
@@ -234,5 +227,24 @@ final class AppState: ObservableObject {
         ChatService.allCases
             .filter { $0 != selectedService && !isBusy($0) }
             .forEach { browser(for: $0).release() }
+    }
+
+    /// SwiftUI can briefly keep the outgoing representable alive after its
+    /// selection or split state changes. Releasing during that update lets the
+    /// old host recreate its browser, so defer cleanup until the pane transition
+    /// has settled.
+    private func scheduleInactiveBrowserRelease() {
+        inactiveBrowserReleaseTask?.cancel()
+        let expectedService = selectedService
+        inactiveBrowserReleaseTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .milliseconds(300))
+            guard !Task.isCancelled,
+                  let self,
+                  !self.isSplitView,
+                  !self.keepsProvidersLoaded,
+                  self.selectedService == expectedService else { return }
+            self.releaseInactiveBrowsersIfNeeded()
+            self.inactiveBrowserReleaseTask = nil
+        }
     }
 }

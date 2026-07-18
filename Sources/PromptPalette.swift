@@ -90,29 +90,33 @@ private final class QuickPromptPanelController: NSObject, NSWindowDelegate {
     private func revealWorkspace() {
         NSApp.unhide(nil)
 
-        if let workspaceWindow = workspaceWindow(), workspaceWindow.isVisible || workspaceWindow.isMiniaturized {
+        if let workspaceWindow = DuetWindowRegistry.visibleWorkspaceWindow() {
             focus(workspaceWindow)
             return
         }
 
+        let windowSnapshot = WorkspaceWindowSnapshot(windows: NSApp.windows)
         reopenWorkspace()
-        focusReopenedWorkspace()
+        focusReopenedWorkspace(after: windowSnapshot)
     }
 
-    private func workspaceWindow() -> NSWindow? {
-        if let registeredWorkspaceWindow = DuetWindowRegistry.workspaceWindow {
-            return registeredWorkspaceWindow
-        }
-        return NSApp.windows.first { $0.identifier == DuetWindowIdentifier.workspace }
-    }
-
-    private func focusReopenedWorkspace(attemptsRemaining: Int = 20) {
+    private func focusReopenedWorkspace(
+        after windowSnapshot: WorkspaceWindowSnapshot,
+        attemptsRemaining: Int = 40
+    ) {
         DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(50)) { [weak self] in
             guard let self else { return }
-            if let workspaceWindow = self.workspaceWindow(), workspaceWindow.isVisible || workspaceWindow.isMiniaturized {
+
+            if let workspaceWindow = DuetWindowRegistry.visibleWorkspaceWindow() {
                 self.focus(workspaceWindow)
+            } else if let reopenedWindow = windowSnapshot.reopenedWorkspaceWindow(in: NSApp.windows) {
+                DuetWindowRegistry.register(reopenedWindow)
+                self.focus(reopenedWindow)
             } else if attemptsRemaining > 1 {
-                self.focusReopenedWorkspace(attemptsRemaining: attemptsRemaining - 1)
+                self.focusReopenedWorkspace(
+                    after: windowSnapshot,
+                    attemptsRemaining: attemptsRemaining - 1
+                )
             }
         }
     }

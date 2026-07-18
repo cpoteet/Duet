@@ -193,6 +193,55 @@ struct HostLifecycleTests {
             "The workspace marker should register the exact workspace window for later restoration"
         )
 
+        identifiedWorkspaceWindow.orderOut(nil)
+        let existingVisibleWindow = NSWindow(
+            contentRect: .init(x: 0, y: 0, width: 400, height: 400),
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        existingVisibleWindow.orderFront(nil)
+        let workspaceWindowSnapshot = WorkspaceWindowSnapshot(
+            windows: [identifiedWorkspaceWindow, existingVisibleWindow]
+        )
+        let replacementWorkspaceWindow = NSWindow(
+            contentRect: .init(x: 0, y: 0, width: 400, height: 400),
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        replacementWorkspaceWindow.orderFront(nil)
+        expect(
+            DuetWindowRegistry.visibleWorkspaceWindow(
+                in: [identifiedWorkspaceWindow, existingVisibleWindow, replacementWorkspaceWindow]
+            ) == nil,
+            "A closed registered workspace should not be treated as a restorable visible window"
+        )
+        expect(
+            workspaceWindowSnapshot.reopenedWorkspaceWindow(
+                in: [existingVisibleWindow, replacementWorkspaceWindow]
+            ) === replacementWorkspaceWindow,
+            "Workspace restoration should select the newly shown replacement, not an existing visible window"
+        )
+        if let reopenedWorkspaceWindow = workspaceWindowSnapshot.reopenedWorkspaceWindow(
+            in: [existingVisibleWindow, replacementWorkspaceWindow]
+        ) {
+            DuetWindowRegistry.register(reopenedWorkspaceWindow)
+        }
+        expect(
+            replacementWorkspaceWindow.identifier == DuetWindowIdentifier.workspace,
+            "A replacement workspace should receive the stable workspace identifier immediately"
+        )
+        expect(
+            DuetWindowRegistry.visibleWorkspaceWindow(
+                in: [identifiedWorkspaceWindow, existingVisibleWindow, replacementWorkspaceWindow]
+            ) === replacementWorkspaceWindow,
+            "Workspace restoration should replace the stale registry entry with the exact reopened window"
+        )
+        replacementWorkspaceWindow.orderOut(nil)
+        existingVisibleWindow.orderOut(nil)
+        DuetWindowRegistry.unregister(replacementWorkspaceWindow)
+
         let filePickerSelector = NSSelectorFromString(
             "webView:runOpenPanelWithParameters:initiatedByFrame:completionHandler:"
         )

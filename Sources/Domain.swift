@@ -129,6 +129,11 @@ enum PromptDispatchOutcome: Equatable {
         if case .sent = self { return true }
         return false
     }
+
+    var isVisibleInDispatchNotice: Bool {
+        if case .loginRequired = self { return false }
+        return true
+    }
 }
 
 struct PromptDispatchResult: Equatable {

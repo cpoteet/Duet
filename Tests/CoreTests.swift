@@ -29,6 +29,8 @@ struct CoreTests {
         expect(PromptDispatchOutcome.sent.wasSent, "Sent outcome must be marked sent")
         expect(!PromptDispatchOutcome.unavailable.wasSent, "Unavailable outcome must not be marked sent")
         expect(PromptDispatchOutcome.loginRequired.label == "Sign in required", "Login state must map correctly")
+        expect(!PromptDispatchOutcome.loginRequired.isVisibleInDispatchNotice, "Sign-in results must not create persistent notices")
+        expect(PromptDispatchOutcome.unavailable.isVisibleInDispatchNotice, "Non-authentication failures must remain visible")
         expect(!PromptDispatchOutcome.composerHasDraft.offersBrowserFallback, "Draft conflicts should stay in the provider pane")
 
         for service in ChatService.allCases {

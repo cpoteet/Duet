@@ -10,8 +10,27 @@ enum DuetWindowRegistry {
     static weak var workspaceWindow: NSWindow?
 
     static func register(_ window: NSWindow) {
+        if let workspaceWindow,
+           workspaceWindow !== window,
+           NSApp.windows.contains(where: { $0 === workspaceWindow }),
+           workspaceWindow.isVisible || workspaceWindow.isMiniaturized,
+           !window.isVisible && !window.isMiniaturized {
+            return
+        }
+
+        if let workspaceWindow, workspaceWindow !== window {
+            workspaceWindow.identifier = nil
+            workspaceWindow.isExcludedFromWindowsMenu = true
+        }
+
         window.identifier = DuetWindowIdentifier.workspace
+        window.isExcludedFromWindowsMenu = false
         workspaceWindow = window
+    }
+
+    static func isActiveWorkspaceWindow(_ window: NSWindow) -> Bool {
+        window.identifier == DuetWindowIdentifier.workspace
+            && (window.isVisible || window.isMiniaturized)
     }
 
     static func unregister(_ window: NSWindow) {
@@ -27,8 +46,6 @@ enum DuetWindowRegistry {
             return workspaceWindow
         }
 
-        workspaceWindow = nil
-
         guard let identifiedWindow = windows.first(where: {
             $0.identifier == DuetWindowIdentifier.workspace
                 && ($0.isVisible || $0.isMiniaturized)
@@ -36,7 +53,7 @@ enum DuetWindowRegistry {
             return nil
         }
 
-        workspaceWindow = identifiedWindow
+        register(identifiedWindow)
         return identifiedWindow
     }
 }
@@ -64,8 +81,12 @@ struct WorkspaceWindowSnapshot {
 
 @MainActor
 final class WorkspaceWindowMarkerView: NSView {
+    private var registrationTask: Task<Void, Never>?
+
     override func viewWillMove(toWindow newWindow: NSWindow?) {
         if let window, window !== newWindow {
+            registrationTask?.cancel()
+            registrationTask = nil
             DuetWindowRegistry.unregister(window)
         }
         super.viewWillMove(toWindow: newWindow)
@@ -74,11 +95,24 @@ final class WorkspaceWindowMarkerView: NSView {
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
         registerWorkspaceWindow()
+        scheduleRegistrationRefresh()
     }
 
     func registerWorkspaceWindow() {
         guard let window else { return }
         DuetWindowRegistry.register(window)
+    }
+
+    private func scheduleRegistrationRefresh() {
+        registrationTask?.cancel()
+        registrationTask = Task { @MainActor [weak self] in
+            for _ in 0..<10 {
+                try? await Task.sleep(for: .milliseconds(50))
+                guard !Task.isCancelled, let self, self.window != nil else { return }
+                self.registerWorkspaceWindow()
+            }
+            self?.registrationTask = nil
+        }
     }
 }
 

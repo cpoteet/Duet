@@ -519,9 +519,13 @@ struct ContentView: View {
     }
 
     private func presentToast(for results: [PromptDispatchResult]) {
-        guard !results.isEmpty else { return }
-        let failedResults = results.filter { !$0.wasSent }
-        let sentServices = results.filter(\.wasSent).map(\.service.title)
+        let visibleResults = results.filter { $0.outcome.isVisibleInDispatchNotice }
+        guard !visibleResults.isEmpty else {
+            dismissToast()
+            return
+        }
+        let failedResults = visibleResults.filter { !$0.wasSent }
+        let sentServices = visibleResults.filter(\.wasSent).map(\.service.title)
         let nextToast: DispatchToast
 
         if failedResults.isEmpty {

@@ -128,6 +128,8 @@ struct HostLifecycleTests {
         let mountHost = BrowserHostView(frame: mountWindow.contentView?.bounds ?? .zero)
         var mountNotificationCount = 0
         mountHost.onWindowAttachment = { mountNotificationCount += 1 }
+        mountWindow.orderFront(nil)
+        DuetWindowRegistry.register(mountWindow)
         mountWindow.contentView = mountHost
         mountHost.scheduleWindowAttachment()
         mountHost.scheduleWindowAttachment()
@@ -147,6 +149,51 @@ struct HostLifecycleTests {
             mountNotificationCount == 1,
             "A dismantled browser host must cancel its pending mount callback"
         )
+        mountWindow.orderOut(nil)
+        DuetWindowRegistry.unregister(mountWindow)
+
+        let restoredWindow = NSWindow(
+            contentRect: .init(x: 0, y: 0, width: 400, height: 400),
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        let restoredHost = BrowserHostView(frame: restoredWindow.contentView?.bounds ?? .zero)
+        let restoredBrowser = BrowserController(service: .chatGPT)
+        let restoredWebView = restoredBrowser.prepare()
+        restoredHost.onWindowAttachment = {
+            restoredHost.synchronizeHostedWebView(restoredBrowser.webView)
+        }
+        restoredWindow.contentView = restoredHost
+        try? await Task.sleep(for: .milliseconds(20))
+        expect(
+            restoredWebView.superview == nil,
+            "A provider view must not mount into a workspace before that window becomes active"
+        )
+        restoredWindow.orderFront(nil)
+        DuetWindowRegistry.register(restoredWindow)
+        try? await Task.sleep(for: .milliseconds(100))
+        expect(
+            restoredWebView.superview === restoredHost,
+            "A restored workspace must mount its provider view after becoming the active workspace"
+        )
+
+        let staleWorkspaceWindow = NSWindow(
+            contentRect: .init(x: 0, y: 0, width: 400, height: 400),
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        let staleWorkspaceHost = BrowserHostView(frame: staleWorkspaceWindow.contentView?.bounds ?? .zero)
+        staleWorkspaceWindow.contentView = staleWorkspaceHost
+        staleWorkspaceWindow.orderOut(nil)
+        staleWorkspaceHost.synchronizeHostedWebView(restoredWebView)
+        expect(
+            restoredWebView.superview === restoredHost,
+            "A stale workspace host must not steal a provider view from the registered workspace"
+        )
+        restoredWindow.orderOut(nil)
+        DuetWindowRegistry.unregister(restoredWindow)
 
         let focusWindow = NSWindow(
             contentRect: .init(x: 0, y: 0, width: 400, height: 400),
@@ -237,6 +284,14 @@ struct HostLifecycleTests {
                 in: [identifiedWorkspaceWindow, existingVisibleWindow, replacementWorkspaceWindow]
             ) === replacementWorkspaceWindow,
             "Workspace restoration should replace the stale registry entry with the exact reopened window"
+        )
+        expect(
+            identifiedWorkspaceWindow.isExcludedFromWindowsMenu,
+            "A replaced workspace should be removed from the Window menu"
+        )
+        expect(
+            identifiedWorkspaceWindow.identifier != DuetWindowIdentifier.workspace,
+            "A replaced workspace must lose the identifier that permits provider hosting"
         )
         replacementWorkspaceWindow.orderOut(nil)
         existingVisibleWindow.orderOut(nil)

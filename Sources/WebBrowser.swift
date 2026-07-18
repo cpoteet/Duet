@@ -609,7 +609,8 @@ final class BrowserHostView: NSView {
     /// controller-owned web view; otherwise a cached host can steal it from the
     /// visible pane and leave that pane blank.
     func synchronizeHostedWebView(_ webView: WKWebView?) {
-        guard window != nil else { return }
+        guard let window,
+              DuetWindowRegistry.isActiveWorkspaceWindow(window) else { return }
         if let webView {
             install(webView)
         } else {
@@ -623,10 +624,18 @@ final class BrowserHostView: NSView {
     func scheduleWindowAttachment() {
         windowAttachmentTask?.cancel()
         windowAttachmentTask = Task { @MainActor [weak self] in
-            await Task.yield()
-            guard !Task.isCancelled, let self, self.window != nil else { return }
-            self.resignHostedFirstResponderIfNeeded()
-            self.onWindowAttachment?()
+            for _ in 0..<40 {
+                await Task.yield()
+                guard !Task.isCancelled, let self, let window = self.window else { return }
+                if DuetWindowRegistry.isActiveWorkspaceWindow(window) {
+                    self.resignHostedFirstResponderIfNeeded()
+                    self.onWindowAttachment?()
+                    self.windowAttachmentTask = nil
+                    return
+                }
+                try? await Task.sleep(for: .milliseconds(50))
+            }
+            self?.windowAttachmentTask = nil
         }
     }
 

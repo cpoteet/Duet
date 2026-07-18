@@ -337,6 +337,55 @@ struct HostLifecycleTests {
             browserController.responds(to: downloadDestinationSelector),
             "Browser controller should choose destinations for WebKit downloads"
         )
+        expect(
+            BrowserController.shouldDownloadNavigationResponse(
+                canShowMIMEType: true,
+                contentDisposition: "attachment; filename=report.pdf"
+            ),
+            "Attachment responses should become downloads"
+        )
+        expect(
+            !BrowserController.shouldDownloadNavigationResponse(
+                canShowMIMEType: true,
+                contentDisposition: "inline; filename=attachment-guide.pdf"
+            ),
+            "Inline responses must not become downloads because of filename text"
+        )
+        expect(
+            BrowserController.shouldDownloadNavigationResponse(
+                canShowMIMEType: true,
+                contentDisposition: "  AtTaChMeNt ; filename=report.pdf"
+            ),
+            "Attachment disposition matching should ignore case and surrounding whitespace"
+        )
+        expect(
+            BrowserController.shouldDownloadNavigationResponse(
+                canShowMIMEType: false,
+                contentDisposition: "inline"
+            ),
+            "Responses with unsupported MIME types should become downloads"
+        )
+        let downloadPhaseBrowser = BrowserController(service: .chatGPT)
+        downloadPhaseBrowser.beginProvisionalNavigation()
+        downloadPhaseBrowser.restorePhaseForMainFrameDownload()
+        downloadPhaseBrowser.handleNavigationFailure(
+            NSError(domain: "WebKitErrorDomain", code: 102)
+        )
+        expect(
+            downloadPhaseBrowser.phase == .unloaded,
+            "A successful download conversion must not leave the provider in a failed or loading phase"
+        )
+        let failedNavigationBrowser = BrowserController(service: .chatGPT)
+        failedNavigationBrowser.beginProvisionalNavigation()
+        failedNavigationBrowser.restorePhaseForMainFrameDownload()
+        failedNavigationBrowser.handleNavigationFailure(
+            NSError(domain: NSURLErrorDomain, code: NSURLErrorCannotConnectToHost)
+        )
+        if case .failed = failedNavigationBrowser.phase {
+            // Expected: only known download interruptions are suppressed.
+        } else {
+            failures.append("A real navigation failure must remain visible after download classification")
+        }
         let observableBrowser = BrowserController(service: .chatGPT)
         var browserChangeCount = 0
         let browserChangeObserver = observableBrowser.objectWillChange.sink {

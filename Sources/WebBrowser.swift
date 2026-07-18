@@ -11,6 +11,11 @@ final class BrowserController: NSObject, ObservableObject {
     @Published private(set) var phase: BrowserPhase = .unloaded
     @Published private(set) var webView: WKWebView?
     private var hasRetriedBlankInitialClaudeLoad = false
+    // WebKit ends a main-frame navigation with error 102 after converting it
+    // into a WKDownload. Preserve the page's prior phase for that exact path.
+    private var phaseBeforeProvisionalNavigation: BrowserPhase?
+    private var phaseRestoredForMainFrameDownload: BrowserPhase?
+    private weak var mainFrameDownload: WKDownload?
 
     init(service: ChatService) {
         self.service = service
@@ -67,12 +72,13 @@ final class BrowserController: NSObject, ObservableObject {
             webView.perform(closeSelector)
         }
         self.webView = nil
+        clearNavigationPhaseTracking()
         phase = .unloaded
     }
 
     func reload() {
         if let webView {
-            phase = .loading
+            beginProgrammaticNavigation()
             webView.reload()
         } else {
             _ = acquire()
@@ -130,7 +136,7 @@ final class BrowserController: NSObject, ObservableObject {
     private func openNewConversation() {
         let webView = prepare()
         webView.stopLoading()
-        phase = .loading
+        beginProgrammaticNavigation()
         webView.load(URLRequest(url: service.newConversationURL))
     }
 
@@ -177,7 +183,7 @@ final class BrowserController: NSObject, ObservableObject {
 
     private func startInitialNavigationIfNeeded(in webView: WKWebView) {
         guard phase == .unloaded else { return }
-        phase = .loading
+        beginProgrammaticNavigation()
         webView.load(URLRequest(url: service.startURL))
     }
 
@@ -235,8 +241,81 @@ final class BrowserController: NSObject, ObservableObject {
         guard (try? await evaluate(script, as: Bool.self)) == true else { return }
 
         hasRetriedBlankInitialClaudeLoad = true
-        phase = .loading
+        beginProgrammaticNavigation()
         loadedWebView.reload()
+    }
+
+    private func beginProgrammaticNavigation() {
+        phaseBeforeProvisionalNavigation = phase
+        phaseRestoredForMainFrameDownload = nil
+        mainFrameDownload = nil
+        phase = .loading
+    }
+
+    func beginProvisionalNavigation() {
+        if phaseRestoredForMainFrameDownload == nil, phase != .loading {
+            phaseBeforeProvisionalNavigation = phase
+        }
+        phase = .loading
+    }
+
+    func restorePhaseForMainFrameDownload() {
+        let restoredPhase = phaseBeforeProvisionalNavigation
+            ?? (phase == .loading ? .ready : phase)
+        phaseRestoredForMainFrameDownload = restoredPhase
+        phase = restoredPhase
+    }
+
+    func handleNavigationFailure(_ error: Error) {
+        if let restoredPhase = phaseRestoredForMainFrameDownload,
+           Self.isDownloadNavigationInterruption(error) {
+            phase = restoredPhase
+        } else {
+            phase = .failed(error.localizedDescription)
+        }
+        clearNavigationPhaseTracking()
+    }
+
+    private func completeNavigation() {
+        clearNavigationPhaseTracking()
+        phase = .ready
+    }
+
+    private func completeMainFrameDownload(_ download: WKDownload) {
+        guard mainFrameDownload === download else { return }
+        if let restoredPhase = phaseRestoredForMainFrameDownload {
+            phase = restoredPhase
+        }
+        clearNavigationPhaseTracking()
+    }
+
+    private func clearNavigationPhaseTracking() {
+        phaseBeforeProvisionalNavigation = nil
+        phaseRestoredForMainFrameDownload = nil
+        mainFrameDownload = nil
+    }
+
+    static func shouldDownloadNavigationResponse(
+        canShowMIMEType: Bool,
+        contentDisposition: String?
+    ) -> Bool {
+        !canShowMIMEType || isAttachmentContentDisposition(contentDisposition)
+    }
+
+    private static func isAttachmentContentDisposition(_ value: String?) -> Bool {
+        guard let dispositionType = value?
+            .split(separator: ";", maxSplits: 1, omittingEmptySubsequences: false)
+            .first?
+            .trimmingCharacters(in: .whitespacesAndNewlines) else {
+            return false
+        }
+        return dispositionType.caseInsensitiveCompare("attachment") == .orderedSame
+    }
+
+    private static func isDownloadNavigationInterruption(_ error: Error) -> Bool {
+        let nsError = error as NSError
+        return (nsError.domain == "WebKitErrorDomain" && nsError.code == 102)
+            || (nsError.domain == NSURLErrorDomain && nsError.code == NSURLErrorCancelled)
     }
 
     private func waitForSubmission(
@@ -364,9 +443,11 @@ extension BrowserController: WKNavigationDelegate {
     ) {
         MainActor.assumeIsolated {
             let contentDisposition = (navigationResponse.response as? HTTPURLResponse)?
-                .value(forHTTPHeaderField: "Content-Disposition")?
-                .lowercased()
-            if navigationResponse.canShowMIMEType == false || contentDisposition?.contains("attachment") == true {
+                .value(forHTTPHeaderField: "Content-Disposition")
+            if Self.shouldDownloadNavigationResponse(
+                canShowMIMEType: navigationResponse.canShowMIMEType,
+                contentDisposition: contentDisposition
+            ) {
                 decisionHandler(.download)
             } else {
                 decisionHandler(.allow)
@@ -381,6 +462,10 @@ extension BrowserController: WKNavigationDelegate {
     ) {
         MainActor.assumeIsolated {
             download.delegate = self
+            if navigationAction.targetFrame?.isMainFrame == true {
+                self.mainFrameDownload = download
+                self.restorePhaseForMainFrameDownload()
+            }
         }
     }
 
@@ -391,36 +476,42 @@ extension BrowserController: WKNavigationDelegate {
     ) {
         MainActor.assumeIsolated {
             download.delegate = self
+            if navigationResponse.isForMainFrame {
+                self.mainFrameDownload = download
+                self.restorePhaseForMainFrameDownload()
+            }
         }
     }
 
     nonisolated func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
-        Task { @MainActor in
+        MainActor.assumeIsolated {
             guard self.webView === webView else { return }
-            self.phase = .loading
+            self.beginProvisionalNavigation()
         }
     }
 
     nonisolated func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-        Task { @MainActor in
+        MainActor.assumeIsolated {
             guard self.webView === webView else { return }
-            self.phase = .ready
-            await self.detectVerificationChallenge(in: webView)
-            await self.retryBlankInitialClaudeLoadIfNeeded(in: webView)
+            self.completeNavigation()
+            Task { @MainActor in
+                await self.detectVerificationChallenge(in: webView)
+                await self.retryBlankInitialClaudeLoadIfNeeded(in: webView)
+            }
         }
     }
 
     nonisolated func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
-        Task { @MainActor in
+        MainActor.assumeIsolated {
             guard self.webView === webView else { return }
-            self.phase = .failed(error.localizedDescription)
+            self.handleNavigationFailure(error)
         }
     }
 
     nonisolated func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
-        Task { @MainActor in
+        MainActor.assumeIsolated {
             guard self.webView === webView else { return }
-            self.phase = .failed(error.localizedDescription)
+            self.handleNavigationFailure(error)
         }
     }
 
@@ -484,9 +575,14 @@ extension BrowserController: WKDownloadDelegate {
         didFailWithError error: Error,
         resumeData: Data?
     ) {
+        completeMainFrameDownload(download)
         let nsError = error as NSError
         guard !(nsError.domain == NSURLErrorDomain && nsError.code == NSURLErrorCancelled) else { return }
         presentDownloadError(error)
+    }
+
+    func downloadDidFinish(_ download: WKDownload) {
+        completeMainFrameDownload(download)
     }
 
     private static func safeDownloadFilename(_ suggestedFilename: String) -> String {

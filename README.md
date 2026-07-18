@@ -14,6 +14,7 @@ Both the ChatGPT and Claude Mac apps are bloated Electron apps that are unnecess
 - **Shared prompt drawer.** Expand the native prompt bar to send plain-text prompts to the active provider or to both providers at once.
 - **Your familiar AI workspaces.** Conversations, chat history, attachments, and provider-specific tools stay inside the official websites.
 - **Native file transfers.** Upload attachments with the standard file picker and save provider-generated files with a macOS save dialog.
+- **Lightweight update notices.** Once per launch, Duet checks the latest public GitHub Release and shows a dismissible banner when a newer version is available. It never downloads or installs updates automatically.
 - **Persistent sign-in sessions.** Duet uses persistent WebKit website data so your sessions normally remain available after relaunching.
 - **Configurable switching performance.** Keep Duet's lower-memory default, or enable **Keep both providers loaded** in Settings for faster switching.
 - **Privacy-minded by design.** Sign in directly with each provider; Duet does not collect, store, or transmit your credentials.

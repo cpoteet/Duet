@@ -11,6 +11,7 @@ xcrun swiftc \
   -strict-concurrency=complete \
   -warnings-as-errors \
   "$ROOT/Sources/Domain.swift" \
+  "$ROOT/Sources/UpdateChecker.swift" \
   "$ROOT/Sources/ProviderAdapter.swift" \
   "$ROOT/Tests/CoreTests.swift" \
   -o "$BUILD_DIR/DuetTests"
@@ -29,6 +30,7 @@ xcrun swiftc \
   -framework AppKit \
   -framework Combine \
   "$ROOT/Sources/Domain.swift" \
+  "$ROOT/Sources/UpdateChecker.swift" \
   "$ROOT/Sources/ProviderAdapter.swift" \
   "$ROOT/Sources/WebBrowser.swift" \
   "$ROOT/Sources/AppState.swift" \

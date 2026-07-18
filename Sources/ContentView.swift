@@ -19,6 +19,11 @@ struct ContentView: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            if let update = appState.updateAvailable {
+                updateBanner(update)
+                    .transition(.move(edge: .top).combined(with: .opacity))
+            }
+
             if appState.isLaunchChooserVisible {
                 launchChooser
                 launchPromptDrawer
@@ -32,6 +37,10 @@ struct ContentView: View {
         .background(palette.canvas)
         .background { WorkspaceWindowMarker() }
         .animation(.easeOut(duration: 0.2), value: appState.isSplitView)
+        .animation(.easeOut(duration: 0.2), value: appState.updateAvailable)
+        .task {
+            await appState.checkForUpdateIfNeeded()
+        }
         .onAppear {
             isComposerOpen = false
             appState.setKeepsProvidersLoaded(keepProvidersLoaded)
@@ -46,6 +55,46 @@ struct ContentView: View {
         .onDisappear {
             toastDismissal?.cancel()
         }
+    }
+
+    private func updateBanner(_ update: UpdateInfo) -> some View {
+        HStack(spacing: 0) {
+            Button {
+                NSWorkspace.shared.open(update.releaseURL)
+            } label: {
+                HStack(spacing: 7) {
+                    Image(systemName: "arrow.down.circle.fill")
+                    Text("Duet \(update.version) is available")
+                        .fontWeight(.medium)
+                    Spacer(minLength: 12)
+                    Text("View Release")
+                    Image(systemName: "arrow.up.right")
+                }
+                .font(.system(size: 12))
+                .foregroundStyle(palette.primaryText)
+                .padding(.leading, 16)
+                .padding(.trailing, 10)
+                .frame(maxWidth: .infinity, minHeight: 34)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityHint("Opens the Duet release page in your browser")
+
+            Button {
+                appState.dismissAvailableUpdate()
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundStyle(palette.secondaryText)
+                    .frame(width: 34, height: 34)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help("Dismiss this version")
+            .accessibilityLabel("Dismiss Duet \(update.version) update")
+        }
+        .background(palette.accent.opacity(colorScheme == .dark ? 0.16 : 0.09))
+        .overlay(alignment: .bottom) { hairline }
     }
 
     private var launchChooser: some View {

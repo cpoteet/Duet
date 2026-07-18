@@ -32,6 +32,18 @@ struct CoreTests {
         expect(!PromptDispatchOutcome.loginRequired.isVisibleInDispatchNotice, "Sign-in results must not create persistent notices")
         expect(PromptDispatchOutcome.unavailable.isVisibleInDispatchNotice, "Non-authentication failures must remain visible")
         expect(!PromptDispatchOutcome.composerHasDraft.offersBrowserFallback, "Draft conflicts should stay in the provider pane")
+        expect(UpdateChecker.isNewer(remote: "2.0.0", local: "1.9.9"), "A newer major version should be detected")
+        expect(UpdateChecker.isNewer(remote: "1.4.0", local: "1.3.9"), "A newer minor version should be detected")
+        expect(UpdateChecker.isNewer(remote: "1.3.1", local: "1.3.0"), "A newer patch version should be detected")
+        expect(UpdateChecker.isNewer(remote: "1.0.1", local: "1.0"), "Missing local segments should be treated as zero")
+        expect(!UpdateChecker.isNewer(remote: "1.0", local: "1.0.1"), "Missing remote segments should be treated as zero")
+        expect(!UpdateChecker.isNewer(remote: "1.3.0", local: "1.3.0"), "Equal versions should not notify")
+        expect(!UpdateChecker.isNewer(remote: "1.2.9", local: "1.3.0"), "Older versions should not notify")
+        expect(UpdateChecker.isNewer(remote: "10.20.30", local: "10.20.29"), "Multi-digit segments must compare numerically")
+        expect(UpdateChecker.normalizedVersion("v1.4.0") == "1.4.0", "Release tags should allow a leading v")
+        expect(UpdateChecker.normalizedVersion(" 1.4.0 ") == "1.4.0", "Release versions should trim whitespace")
+        expect(UpdateChecker.normalizedVersion("1.beta.0") == nil, "Non-numeric release versions should be rejected")
+        expect(!UpdateChecker.isNewer(remote: "1..1", local: "1.0.0"), "Malformed versions should not compare as newer")
 
         for service in ChatService.allCases {
             let adapter = ProviderAdapter.adapter(for: service)

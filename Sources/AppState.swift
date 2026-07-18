@@ -10,11 +10,14 @@ final class AppState: ObservableObject {
     @Published private(set) var activeDispatchServices: Set<ChatService> = []
     @Published private(set) var resettingServices: Set<ChatService> = []
     @Published private(set) var dispatchNotice: DispatchNotice?
+    @Published private(set) var updateAvailable: UpdateInfo?
 
     private let browsers: [ChatService: BrowserController]
     private var keepsProvidersLoaded = false
     private var mountedSplitServices: Set<ChatService> = []
     private var inactiveBrowserReleaseTask: Task<Void, Never>?
+    private var hasCompletedUpdateCheck = false
+    private var isCheckingForUpdate = false
     private let inactiveBrowserReleaseDelay: Duration
 
     init(inactiveBrowserReleaseDelay: Duration = .milliseconds(300)) {
@@ -223,6 +226,25 @@ final class AppState: ObservableObject {
     func consumeDispatchNotice(_ id: UUID) {
         guard dispatchNotice?.id == id else { return }
         dispatchNotice = nil
+    }
+
+    func checkForUpdateIfNeeded() async {
+        guard !hasCompletedUpdateCheck, !isCheckingForUpdate else { return }
+        isCheckingForUpdate = true
+        defer { isCheckingForUpdate = false }
+
+        do {
+            updateAvailable = try await UpdateChecker.check()
+            hasCompletedUpdateCheck = true
+        } catch {
+            // A later workspace remount can retry after a transient failure.
+        }
+    }
+
+    func dismissAvailableUpdate() {
+        guard let updateAvailable else { return }
+        UpdateChecker.dismiss(updateAvailable.version)
+        self.updateAvailable = nil
     }
 
     private func releaseInactiveBrowsersIfNeeded() {

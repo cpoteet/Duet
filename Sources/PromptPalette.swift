@@ -100,7 +100,10 @@ private final class QuickPromptPanelController: NSObject, NSWindowDelegate {
     }
 
     private func workspaceWindow() -> NSWindow? {
-        NSApp.windows.first { $0.identifier == DuetWindowIdentifier.workspace }
+        if let registeredWorkspaceWindow = DuetWindowRegistry.workspaceWindow {
+            return registeredWorkspaceWindow
+        }
+        return NSApp.windows.first { $0.identifier == DuetWindowIdentifier.workspace }
     }
 
     private func focusReopenedWorkspace(attemptsRemaining: Int = 20) {

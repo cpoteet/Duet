@@ -9,7 +9,7 @@ final class BrowserController: NSObject, ObservableObject {
     private let adapter: ProviderAdapter
 
     @Published private(set) var phase: BrowserPhase = .unloaded
-    private(set) var webView: WKWebView?
+    @Published private(set) var webView: WKWebView?
     private var hasRetriedBlankInitialClaudeLoad = false
 
     init(service: ChatService) {
@@ -604,6 +604,19 @@ final class BrowserHostView: NSView {
         hostedWebView = nil
     }
 
+    /// SwiftUI can build transient representable hosts while animating between
+    /// workspace layouts. Only a host attached to a real window may claim the
+    /// controller-owned web view; otherwise a cached host can steal it from the
+    /// visible pane and leave that pane blank.
+    func synchronizeHostedWebView(_ webView: WKWebView?) {
+        guard window != nil else { return }
+        if let webView {
+            install(webView)
+        } else {
+            clear()
+        }
+    }
+
     /// AppKit can attach or update this host while SwiftUI is still rendering.
     /// Defer activation and mount bookkeeping to the next main-actor turn so
     /// those callbacks never publish observable state from `updateNSView`.
@@ -644,18 +657,13 @@ struct BrowserView: NSViewRepresentable {
     func makeNSView(context: Context) -> BrowserHostView {
         let host = BrowserHostView()
         configure(host)
-        if let webView = browser.webView {
-            host.install(webView)
-        }
         host.setAcceptsKeyboardInput(acceptsKeyboardInput)
         return host
     }
 
     func updateNSView(_ nsView: BrowserHostView, context: Context) {
         configure(nsView)
-        if let webView = browser.webView {
-            nsView.install(webView)
-        } else {
+        if browser.webView == nil {
             nsView.clear()
         }
         nsView.setAcceptsKeyboardInput(acceptsKeyboardInput)
@@ -669,7 +677,13 @@ struct BrowserView: NSViewRepresentable {
     }
 
     private func configure(_ host: BrowserHostView) {
-        host.onWindowAttachment = {
+        host.onWindowAttachment = { [weak host, weak browser] in
+            guard let host, let browser else { return }
+            guard let webView = browser.webView else {
+                host.clear()
+                return
+            }
+            host.synchronizeHostedWebView(webView)
             browser.activateWhenHosted()
             onMounted()
         }

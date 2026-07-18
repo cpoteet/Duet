@@ -15,8 +15,10 @@ final class AppState: ObservableObject {
     private var keepsProvidersLoaded = false
     private var mountedSplitServices: Set<ChatService> = []
     private var inactiveBrowserReleaseTask: Task<Void, Never>?
+    private let inactiveBrowserReleaseDelay: Duration
 
-    init() {
+    init(inactiveBrowserReleaseDelay: Duration = .milliseconds(300)) {
+        self.inactiveBrowserReleaseDelay = inactiveBrowserReleaseDelay
         browsers = Dictionary(uniqueKeysWithValues: ChatService.allCases.map { ($0, BrowserController(service: $0)) })
         _ = browser(for: selectedService).prepare()
     }
@@ -58,7 +60,6 @@ final class AppState: ObservableObject {
     func setSplitView(_ enabled: Bool) {
         guard !hasActiveOperations else { return }
         let wasSplitView = isSplitView
-        isSplitView = enabled
         if enabled {
             inactiveBrowserReleaseTask?.cancel()
             inactiveBrowserReleaseTask = nil
@@ -66,7 +67,9 @@ final class AppState: ObservableObject {
                 mountedSplitServices.removeAll()
             }
             ChatService.allCases.forEach { _ = browser(for: $0).prepare() }
+            isSplitView = true
         } else {
+            isSplitView = false
             mountedSplitServices.removeAll()
             scheduleInactiveBrowserRelease()
         }
@@ -236,8 +239,9 @@ final class AppState: ObservableObject {
     private func scheduleInactiveBrowserRelease() {
         inactiveBrowserReleaseTask?.cancel()
         let expectedService = selectedService
+        let releaseDelay = inactiveBrowserReleaseDelay
         inactiveBrowserReleaseTask = Task { @MainActor [weak self] in
-            try? await Task.sleep(for: .milliseconds(300))
+            try? await Task.sleep(for: releaseDelay)
             guard !Task.isCancelled,
                   let self,
                   !self.isSplitView,

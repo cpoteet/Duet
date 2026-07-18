@@ -6,10 +6,21 @@ enum DuetWindowIdentifier {
 }
 
 @MainActor
+enum DuetWindowRegistry {
+    static weak var workspaceWindow: NSWindow?
+}
+
+@MainActor
 final class WorkspaceWindowMarkerView: NSView {
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
-        window?.identifier = DuetWindowIdentifier.workspace
+        registerWorkspaceWindow()
+    }
+
+    func registerWorkspaceWindow() {
+        guard let window else { return }
+        window.identifier = DuetWindowIdentifier.workspace
+        DuetWindowRegistry.workspaceWindow = window
     }
 }
 
@@ -19,6 +30,6 @@ struct WorkspaceWindowMarker: NSViewRepresentable {
     }
 
     func updateNSView(_ nsView: WorkspaceWindowMarkerView, context: Context) {
-        nsView.window?.identifier = DuetWindowIdentifier.workspace
+        nsView.registerWorkspaceWindow()
     }
 }

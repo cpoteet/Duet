@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 import Foundation
 import WebKit
 
@@ -76,6 +77,23 @@ struct HostLifecycleTests {
         expect(
             transferredWebView.superview === secondHost,
             "Old host removed a WKWebView after it moved to the split-pane host"
+        )
+
+        let attachedWindow = NSWindow(
+            contentRect: .init(x: 0, y: 0, width: 400, height: 400),
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        let attachedHost = BrowserHostView(frame: attachedWindow.contentView?.bounds ?? .zero)
+        let detachedHost = BrowserHostView(frame: attachedHost.bounds)
+        let protectedWebView = WKWebView(frame: attachedHost.bounds, configuration: WKWebViewConfiguration())
+        attachedWindow.contentView = attachedHost
+        attachedHost.install(protectedWebView)
+        detachedHost.synchronizeHostedWebView(protectedWebView)
+        expect(
+            protectedWebView.superview === attachedHost,
+            "A detached transient host must not steal a web view from the visible host"
         )
 
         weak var releasedWebView: WKWebView?
@@ -170,6 +188,10 @@ struct HostLifecycleTests {
             identifiedWorkspaceWindow.identifier == DuetWindowIdentifier.workspace,
             "The workspace marker should assign the stable workspace window identifier"
         )
+        expect(
+            DuetWindowRegistry.workspaceWindow === identifiedWorkspaceWindow,
+            "The workspace marker should register the exact workspace window for later restoration"
+        )
 
         let filePickerSelector = NSSelectorFromString(
             "webView:runOpenPanelWithParameters:initiatedByFrame:completionHandler:"
@@ -211,6 +233,34 @@ struct HostLifecycleTests {
             browserController.responds(to: downloadDestinationSelector),
             "Browser controller should choose destinations for WebKit downloads"
         )
+        let observableBrowser = BrowserController(service: .chatGPT)
+        var browserChangeCount = 0
+        let browserChangeObserver = observableBrowser.objectWillChange.sink {
+            browserChangeCount += 1
+        }
+        _ = observableBrowser.prepare()
+        expect(
+            browserChangeCount > 0,
+            "Preparing a recreated provider view should notify an existing SwiftUI browser host"
+        )
+        withExtendedLifetime(browserChangeObserver) {}
+
+        let splitPreparationState = AppState()
+        var providersWerePreparedBeforeSplitPublished = false
+        let splitStateObserver = splitPreparationState.$isSplitView.dropFirst().sink { isSplitView in
+            if isSplitView {
+                providersWerePreparedBeforeSplitPublished = ChatService.allCases.allSatisfy {
+                    splitPreparationState.browser(for: $0).webView != nil
+                }
+            }
+        }
+        splitPreparationState.setSplitView(true)
+        expect(
+            providersWerePreparedBeforeSplitPublished,
+            "Both provider views must exist before split state is published to SwiftUI"
+        )
+        withExtendedLifetime(splitStateObserver) {}
+
         let workspaceState = AppState()
         expect(workspaceState.isLaunchChooserVisible, "Workspace should begin at the tool chooser")
         workspaceState.openWorkspace(for: .service(.claude))
@@ -286,12 +336,200 @@ struct HostLifecycleTests {
             failures.append("Fixture integration test threw: \(error)")
         }
 
+        await testRapidProviderReversals(failures: &failures)
+        await testRapidSplitReversals(failures: &failures)
+        await testRetentionChangesDuringPendingCleanup(failures: &failures)
+        await testRepeatedTransitionSoak(failures: &failures)
+
         if failures.isEmpty {
             print("Browser host and fixture integration tests passed.")
         } else {
             failures.forEach { fputs("FAIL: \($0)\n", stderr) }
             exit(1)
         }
+    }
+
+    @MainActor
+    private static func testRapidProviderReversals(failures: inout [String]) async {
+        let state = AppState(inactiveBrowserReleaseDelay: .milliseconds(10))
+        let originalChatGPTView = state.browser(for: .chatGPT).webView
+
+        for _ in 0..<10 {
+            state.select(.claude)
+            state.select(.chatGPT)
+        }
+        try? await Task.sleep(for: .milliseconds(30))
+        expect(
+            state.selectedService == .chatGPT && state.browser(for: .chatGPT).webView === originalChatGPTView,
+            "Rapid Claude-to-ChatGPT reversals must not release or replace the final selected provider",
+            failures: &failures
+        )
+        expect(
+            state.browser(for: .claude).webView == nil,
+            "Rapid Claude-to-ChatGPT reversals should eventually release inactive Claude",
+            failures: &failures
+        )
+
+        state.select(.claude)
+        try? await Task.sleep(for: .milliseconds(30))
+        let originalClaudeView = state.browser(for: .claude).webView
+        for _ in 0..<10 {
+            state.select(.chatGPT)
+            state.select(.claude)
+        }
+        try? await Task.sleep(for: .milliseconds(30))
+        expect(
+            state.selectedService == .claude && state.browser(for: .claude).webView === originalClaudeView,
+            "Rapid ChatGPT-to-Claude reversals must not release or replace the final selected provider",
+            failures: &failures
+        )
+        expect(
+            state.browser(for: .chatGPT).webView == nil,
+            "Rapid ChatGPT-to-Claude reversals should eventually release inactive ChatGPT",
+            failures: &failures
+        )
+    }
+
+    @MainActor
+    private static func testRapidSplitReversals(failures: inout [String]) async {
+        for selectedService in ChatService.allCases {
+            let releasingState = AppState(inactiveBrowserReleaseDelay: .milliseconds(10))
+            releasingState.select(selectedService)
+            try? await Task.sleep(for: .milliseconds(30))
+
+            releasingState.setSplitView(true)
+            releasingState.setSplitView(false)
+            releasingState.setSplitView(true)
+            try? await Task.sleep(for: .milliseconds(30))
+            expect(releasingState.isSplitView, "Rapid split reversal should stop in split view", failures: &failures)
+            expect(
+                ChatService.allCases.allSatisfy { releasingState.browser(for: $0).webView != nil },
+                "Rapid split reversal should leave exactly one prepared view per provider",
+                failures: &failures
+            )
+
+            releasingState.setSplitView(false)
+            releasingState.setSplitView(true)
+            releasingState.setSplitView(false)
+            try? await Task.sleep(for: .milliseconds(30))
+            expect(!releasingState.isSplitView, "Rapid split reversal should stop in single-pane view", failures: &failures)
+            expect(
+                releasingState.browser(for: selectedService).webView != nil,
+                "Rapid split reversal must preserve the selected provider in single-pane view",
+                failures: &failures
+            )
+            expect(
+                ChatService.allCases
+                    .filter { $0 != selectedService }
+                    .allSatisfy { releasingState.browser(for: $0).webView == nil },
+                "Rapid split reversal should release the inactive provider in single-pane view",
+                failures: &failures
+            )
+
+            let retainingState = AppState(inactiveBrowserReleaseDelay: .milliseconds(10))
+            retainingState.select(selectedService)
+            retainingState.setKeepsProvidersLoaded(true)
+            let retainedViews = Dictionary(
+                uniqueKeysWithValues: ChatService.allCases.map { ($0, retainingState.browser(for: $0).webView) }
+            )
+            for _ in 0..<10 {
+                retainingState.setSplitView(true)
+                retainingState.setSplitView(false)
+                retainingState.setSplitView(true)
+            }
+            try? await Task.sleep(for: .milliseconds(30))
+            expect(retainingState.isSplitView, "Retained rapid split reversal should stop in split view", failures: &failures)
+            expect(
+                ChatService.allCases.allSatisfy {
+                    retainingState.browser(for: $0).webView === retainedViews[$0]!
+                },
+                "Retention should reuse the same two provider views through rapid split reversals",
+                failures: &failures
+            )
+        }
+    }
+
+    @MainActor
+    private static func testRetentionChangesDuringPendingCleanup(failures: inout [String]) async {
+        let state = AppState(inactiveBrowserReleaseDelay: .milliseconds(20))
+        state.select(.claude)
+        let pendingChatGPTView = state.browser(for: .chatGPT).webView
+        state.setKeepsProvidersLoaded(true)
+        try? await Task.sleep(for: .milliseconds(40))
+        expect(
+            state.browser(for: .chatGPT).webView === pendingChatGPTView
+                && state.browser(for: .claude).webView != nil,
+            "Enabling retention must cancel obsolete inactive-provider cleanup",
+            failures: &failures
+        )
+
+        state.setKeepsProvidersLoaded(false)
+        try? await Task.sleep(for: .milliseconds(40))
+        expect(
+            state.browser(for: .claude).webView != nil && state.browser(for: .chatGPT).webView == nil,
+            "Disabling retention in single-pane mode should release only the inactive provider",
+            failures: &failures
+        )
+
+        state.setKeepsProvidersLoaded(true)
+        state.setSplitView(true)
+        let splitViews = Dictionary(
+            uniqueKeysWithValues: ChatService.allCases.map { ($0, state.browser(for: $0).webView) }
+        )
+        state.setKeepsProvidersLoaded(false)
+        try? await Task.sleep(for: .milliseconds(40))
+        expect(
+            ChatService.allCases.allSatisfy { state.browser(for: $0).webView === splitViews[$0]! },
+            "Disabling retention must not release either provider while split view is active",
+            failures: &failures
+        )
+
+        state.setSplitView(false)
+        try? await Task.sleep(for: .milliseconds(40))
+        expect(
+            state.browser(for: .claude).webView != nil && state.browser(for: .chatGPT).webView == nil,
+            "Leaving split view should resume cleanup after retention was disabled",
+            failures: &failures
+        )
+    }
+
+    @MainActor
+    private static func testRepeatedTransitionSoak(failures: inout [String]) async {
+        let releasingState = AppState(inactiveBrowserReleaseDelay: .milliseconds(5))
+        for _ in 0..<25 {
+            releasingState.select(.claude)
+            try? await Task.sleep(for: .milliseconds(10))
+            releasingState.select(.chatGPT)
+            try? await Task.sleep(for: .milliseconds(10))
+            releasingState.setSplitView(true)
+            releasingState.setSplitView(false)
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+        expect(
+            releasingState.selectedService == .chatGPT
+                && releasingState.browser(for: .chatGPT).webView != nil
+                && releasingState.browser(for: .claude).webView == nil,
+            "Retention-off transition soak should settle with only the selected provider prepared",
+            failures: &failures
+        )
+
+        let retainingState = AppState(inactiveBrowserReleaseDelay: .milliseconds(5))
+        retainingState.setKeepsProvidersLoaded(true)
+        let retainedViews = Dictionary(
+            uniqueKeysWithValues: ChatService.allCases.map { ($0, retainingState.browser(for: $0).webView) }
+        )
+        for _ in 0..<50 {
+            retainingState.select(.claude)
+            retainingState.select(.chatGPT)
+            retainingState.setSplitView(true)
+            retainingState.setSplitView(false)
+        }
+        try? await Task.sleep(for: .milliseconds(20))
+        expect(
+            ChatService.allCases.allSatisfy { retainingState.browser(for: $0).webView === retainedViews[$0]! },
+            "Retention-on transition soak should keep the same two provider views",
+            failures: &failures
+        )
     }
 
     @MainActor

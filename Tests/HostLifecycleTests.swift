@@ -13,6 +13,48 @@ private struct ScriptResult: Decodable, Sendable {
     let reason: String?
 }
 
+private struct NotificationFixtureOutcome: Decodable, Sendable {
+    let supported: Bool
+    let bridgeInstalled: Bool
+    let initial: String?
+    let requested: String?
+    let constructed: Bool
+    let showEventDelivered: Bool
+    let errorEventDelivered: Bool
+    let serviceWorkerPatched: Bool
+    let failure: String?
+}
+
+@MainActor
+private final class RecordingNotificationPresenter: UserNotificationPresenting {
+    struct Shown {
+        let request: NotificationShowRequest
+        let service: ChatService
+    }
+
+    private(set) var cachedPermission: NotificationPermission
+    private let permissionAfterRequest: NotificationPermission
+    private(set) var shown: [Shown] = []
+
+    init(initial: NotificationPermission, afterRequest: NotificationPermission) {
+        cachedPermission = initial
+        permissionAfterRequest = afterRequest
+    }
+
+    func currentPermission() async -> NotificationPermission {
+        cachedPermission
+    }
+
+    func requestPermission() async -> NotificationPermission {
+        cachedPermission = permissionAfterRequest
+        return cachedPermission
+    }
+
+    func show(_ request: NotificationShowRequest, from service: ChatService) {
+        shown.append(Shown(request: request, service: service))
+    }
+}
+
 @MainActor
 private final class FixtureLoader: NSObject, WKNavigationDelegate {
     private var continuation: CheckedContinuation<Void, Error>?
@@ -22,6 +64,15 @@ private final class FixtureLoader: NSObject, WKNavigationDelegate {
         try await withCheckedThrowingContinuation { continuation in
             self.continuation = continuation
             webView.loadFileURL(url, allowingReadAccessTo: url.deletingLastPathComponent())
+        }
+    }
+
+    /// Loads fixture markup under a real origin so origin-gated user scripts run.
+    func loadHTML(_ html: String, baseURL: URL, in webView: WKWebView) async throws {
+        webView.navigationDelegate = self
+        try await withCheckedThrowingContinuation { continuation in
+            self.continuation = continuation
+            webView.loadHTMLString(html, baseURL: baseURL)
         }
     }
 
@@ -485,6 +536,7 @@ struct HostLifecycleTests {
             try await testRepeatedPromptConfirmation(failures: &failures)
             try await testExistingDraftProtection(failures: &failures)
             try await testSignedOutFixture(failures: &failures)
+            try await testNotificationBridgeFixture(failures: &failures)
         } catch {
             failures.append("Fixture integration test threw: \(error)")
         }
@@ -877,6 +929,88 @@ struct HostLifecycleTests {
         try await discussionLoader.load(fixtureURL("login-discussion.html"), in: discussionWebView)
         let discussionRequiresLogin: Bool = try await evaluate(adapter.loginRequiredScript(), in: discussionWebView)
         expect(!discussionRequiresLogin, "Conversation text should not be mistaken for a sign-in screen", failures: &failures)
+    }
+
+    @MainActor
+    private static func testNotificationBridgeFixture(failures: inout [String]) async throws {
+        let fixtureHTML = try String(contentsOf: fixtureURL("notifications.html"), encoding: .utf8)
+        let claudeOrigin = URL(string: "https://claude.ai")!
+
+        // A page whose permission request is granted must reach the presenter.
+        let grantedPresenter = RecordingNotificationPresenter(initial: .undetermined, afterRequest: .granted)
+        let granted = try await runNotificationFixture(
+            fixtureHTML,
+            baseURL: claudeOrigin,
+            presenter: grantedPresenter
+        )
+        expect(granted.supported, "Provider page did not receive the Notification API", failures: &failures)
+        expect(granted.bridgeInstalled, "Provider page did not receive the Duet notification bridge", failures: &failures)
+        expect(granted.initial == "default", "Initial permission must seed from the native cache", failures: &failures)
+        expect(granted.requested == "granted", "Granted native permission was not reported to the page", failures: &failures)
+        expect(granted.failure == nil, "Notification fixture failed: \(granted.failure ?? "")", failures: &failures)
+        expect(granted.showEventDelivered, "A granted notification must deliver its show event", failures: &failures)
+        expect(granted.serviceWorkerPatched, "Service worker notifications were not routed to the bridge", failures: &failures)
+        expect(
+            grantedPresenter.shown.count == 1
+                && grantedPresenter.shown.first?.request == NotificationShowRequest(
+                    title: "Duet Test",
+                    body: "Body text",
+                    tag: "fixture-tag"
+                )
+                && grantedPresenter.shown.first?.service == .claude,
+            "The page notification did not reach the native presenter intact",
+            failures: &failures
+        )
+
+        // A denied permission must resolve honestly and never post natively.
+        let deniedPresenter = RecordingNotificationPresenter(initial: .denied, afterRequest: .denied)
+        let denied = try await runNotificationFixture(
+            fixtureHTML,
+            baseURL: claudeOrigin,
+            presenter: deniedPresenter
+        )
+        expect(denied.requested == "denied", "Denied native permission was not reported to the page", failures: &failures)
+        expect(denied.errorEventDelivered, "A denied notification must deliver its error event", failures: &failures)
+        expect(deniedPresenter.shown.isEmpty, "A denied page must not reach the native presenter", failures: &failures)
+
+        // The shim must stay inert outside provider origins.
+        let foreignPresenter = RecordingNotificationPresenter(initial: .granted, afterRequest: .granted)
+        let foreign = try await runNotificationFixture(
+            fixtureHTML,
+            baseURL: URL(string: "https://example.com")!,
+            presenter: foreignPresenter
+        )
+        expect(!foreign.bridgeInstalled, "Non-provider origins must not receive the Duet notification bridge", failures: &failures)
+        expect(foreignPresenter.shown.isEmpty, "Non-provider origins must not reach the native presenter", failures: &failures)
+    }
+
+    @MainActor
+    private static func runNotificationFixture(
+        _ fixtureHTML: String,
+        baseURL: URL,
+        presenter: RecordingNotificationPresenter
+    ) async throws -> NotificationFixtureOutcome {
+        let configuration = WKWebViewConfiguration()
+        let bridge = NotificationBridge(service: .claude, presenter: presenter)
+        bridge.install(in: configuration.userContentController)
+        let webView = WKWebView(
+            frame: NSRect(x: 0, y: 0, width: 800, height: 600),
+            configuration: configuration
+        )
+        let loader = FixtureLoader()
+        defer {
+            webView.navigationDelegate = nil
+            webView.stopLoading()
+        }
+        try await loader.loadHTML(fixtureHTML, baseURL: baseURL, in: webView)
+
+        let deadline = Date().addingTimeInterval(5)
+        while Date() < deadline {
+            let finished: Bool = try await evaluate("Boolean(window.__duetNotificationTest)", in: webView)
+            if finished { break }
+            try await Task.sleep(for: .milliseconds(50))
+        }
+        return try await evaluate("(window.__duetNotificationTest)", in: webView)
     }
 
     @MainActor

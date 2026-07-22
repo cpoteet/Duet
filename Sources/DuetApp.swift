@@ -13,6 +13,14 @@ struct DuetApp: App {
                     applicationDelegate.configureQuickPrompt(with: appState) {
                         openWindow(id: "workspace")
                     }
+                    let applicationDelegate = applicationDelegate
+                    let appState = appState
+                    DuetNotificationManager.shared.configure { service in
+                        if !appState.isSplitView {
+                            appState.openWorkspace(for: .service(service))
+                        }
+                        applicationDelegate.revealWorkspace()
+                    }
                 }
         }
         .windowResizability(.contentMinSize)

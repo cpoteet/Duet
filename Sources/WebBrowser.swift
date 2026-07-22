@@ -10,6 +10,10 @@ final class BrowserController: NSObject, ObservableObject {
 
     @Published private(set) var phase: BrowserPhase = .unloaded
     @Published private(set) var webView: WKWebView?
+    private lazy var notificationBridge = NotificationBridge(
+        service: service,
+        presenter: DuetNotificationManager.shared
+    )
     private var hasRetriedBlankInitialClaudeLoad = false
     // WebKit ends a main-frame navigation with error 102 after converting it
     // into a WKDownload. Preserve the page's prior phase for that exact path.
@@ -32,6 +36,7 @@ final class BrowserController: NSObject, ObservableObject {
         let configuration = WKWebViewConfiguration()
         configuration.websiteDataStore = .default()
         configuration.preferences.isElementFullscreenEnabled = true
+        notificationBridge.install(in: configuration.userContentController)
 
         let newWebView = WKWebView(frame: .zero, configuration: configuration)
         newWebView.allowsBackForwardNavigationGestures = true

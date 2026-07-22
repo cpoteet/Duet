@@ -13,6 +13,7 @@ xcrun swiftc \
   "$ROOT/Sources/Domain.swift" \
   "$ROOT/Sources/UpdateChecker.swift" \
   "$ROOT/Sources/ProviderAdapter.swift" \
+  "$ROOT/Sources/NotificationScript.swift" \
   "$ROOT/Tests/CoreTests.swift" \
   -o "$BUILD_DIR/DuetTests"
 
@@ -29,9 +30,12 @@ xcrun swiftc \
   -framework WebKit \
   -framework AppKit \
   -framework Combine \
+  -framework UserNotifications \
   "$ROOT/Sources/Domain.swift" \
   "$ROOT/Sources/UpdateChecker.swift" \
   "$ROOT/Sources/ProviderAdapter.swift" \
+  "$ROOT/Sources/NotificationScript.swift" \
+  "$ROOT/Sources/NotificationBridge.swift" \
   "$ROOT/Sources/WebBrowser.swift" \
   "$ROOT/Sources/AppState.swift" \
   "$ROOT/Sources/WindowIdentity.swift" \

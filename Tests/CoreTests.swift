@@ -62,7 +62,50 @@ struct CoreTests {
             expect(fill.contains("A quote:"), "\(service.title) prompt was not encoded")
         }
 
-        let fixtures = ["textarea.html", "contenteditable.html", "signed-out.html", "login-discussion.html", "delayed-send.html"]
+        for service in ChatService.allCases {
+            let shim = NotificationScript.source(
+                initialPermission: .undetermined,
+                allowedHosts: service.webNotificationHosts
+            )
+            expect(shim.contains("messageHandlers?.duetNotifications"), "\(service.title) shim does not target the bridge handler")
+            expect(shim.contains("\"default\""), "\(service.title) shim does not seed the initial permission")
+            for host in service.webNotificationHosts {
+                expect(shim.contains(host), "\(service.title) shim does not restrict itself to \(host)")
+            }
+            expect(!service.webNotificationHosts.isEmpty, "\(service.title) exposes no notification hosts")
+        }
+        expect(
+            NotificationScript.source(initialPermission: .granted, allowedHosts: ["claude.ai"]).contains("\"granted\""),
+            "Shim does not seed a granted permission"
+        )
+        expect(NotificationPermission.undetermined.domValue == "default", "Undetermined permission must map to the DOM default state")
+        expect(NotificationPermission.granted.domValue == "granted", "Granted permission must keep its DOM value")
+        expect(NotificationPermission.denied.domValue == "denied", "Denied permission must keep its DOM value")
+
+        expect(
+            NotificationBridgeMessage(body: ["type": "permission"]) == .permission,
+            "Permission query message was not parsed"
+        )
+        expect(
+            NotificationBridgeMessage(body: ["type": "requestPermission"]) == .requestPermission,
+            "Permission request message was not parsed"
+        )
+        expect(
+            NotificationBridgeMessage(body: ["type": "show", "title": "Done", "body": "Reply ready", "tag": "t"])
+                == .show(NotificationShowRequest(title: "Done", body: "Reply ready", tag: "t")),
+            "Show message was not parsed"
+        )
+        expect(
+            NotificationBridgeMessage(body: ["type": "show", "title": "Done"])
+                == .show(NotificationShowRequest(title: "Done", body: "", tag: "")),
+            "Show message must tolerate missing optional fields"
+        )
+        expect(NotificationBridgeMessage(body: ["type": "show"]) == nil, "Show message without a title must be rejected")
+        expect(NotificationBridgeMessage(body: ["type": "unknown"]) == nil, "Unknown message types must be rejected")
+        expect(NotificationBridgeMessage(body: "show") == nil, "Non-dictionary messages must be rejected")
+        expect(NotificationBridgeMessage(body: ["type": 3]) == nil, "Non-string message types must be rejected")
+
+        let fixtures = ["textarea.html", "contenteditable.html", "signed-out.html", "login-discussion.html", "delayed-send.html", "notifications.html"]
         let fixtureDirectory = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
             .appendingPathComponent("Tests/Fixtures")
         for fixture in fixtures {

@@ -28,6 +28,12 @@ final class DuetApplicationDelegate: NSObject, NSApplicationDelegate {
         quickPrompt?.show()
     }
 
+    /// Brings the workspace forward for surfaces outside the workspace window,
+    /// such as clicking a provider notification.
+    func revealWorkspace() {
+        quickPrompt?.revealWorkspace()
+    }
+
     func applicationWillTerminate(_ notification: Notification) {
         hotKey?.invalidate()
     }
@@ -87,7 +93,7 @@ private final class QuickPromptPanelController: NSObject, NSWindowDelegate {
         panel.orderOut(nil)
     }
 
-    private func revealWorkspace() {
+    func revealWorkspace() {
         NSApp.unhide(nil)
 
         if let workspaceWindow = DuetWindowRegistry.visibleWorkspaceWindow() {

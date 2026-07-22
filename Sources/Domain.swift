@@ -58,6 +58,10 @@ enum ChatService: String, CaseIterable, Identifiable, Hashable {
         ]
     }
 
+    /// Hosts whose pages may use the injected Notification API bridge.
+    /// Authentication hosts are intentionally excluded.
+    var webNotificationHosts: [String] { promptHosts }
+
     func allowsNavigation(to url: URL) -> Bool {
         guard let scheme = url.scheme?.lowercased() else { return false }
         if scheme == "about" { return true }

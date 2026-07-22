@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><title>Notification bridge fixture</title></head>
+<body>
+<script>
+(async () => {
+  const outcome = {
+    supported: typeof Notification === "function",
+    bridgeInstalled: Boolean(window.__duetNotificationBridgeInstalled),
+    initial: null,
+    requested: null,
+    constructed: false,
+    showEventDelivered: false,
+    errorEventDelivered: false,
+    serviceWorkerPatched: false,
+    failure: null
+  };
+  try {
+    if (outcome.supported) {
+      outcome.initial = Notification.permission;
+      outcome.requested = await Notification.requestPermission();
+      const notification = new Notification("Duet Test", { body: "Body text", tag: "fixture-tag" });
+      outcome.constructed = true;
+      await new Promise(resolve => {
+        notification.onshow = () => { outcome.showEventDelivered = true; resolve(); };
+        notification.onerror = () => { outcome.errorEventDelivered = true; resolve(); };
+        setTimeout(resolve, 500);
+      });
+      outcome.serviceWorkerPatched = Boolean(
+        window.ServiceWorkerRegistration
+          && !String(ServiceWorkerRegistration.prototype.showNotification).includes("[native code]")
+      );
+    }
+  } catch (error) {
+    outcome.failure = String(error);
+  }
+  window.__duetNotificationTest = outcome;
+})();
+</script>
+</body>
+</html>

@@ -36,7 +36,7 @@ final class BrowserController: NSObject, ObservableObject {
         let configuration = WKWebViewConfiguration()
         configuration.websiteDataStore = .default()
         configuration.preferences.isElementFullscreenEnabled = true
-        notificationBridge.install(in: configuration.userContentController)
+        notificationBridge.install(in: configuration)
 
         let newWebView = WKWebView(frame: .zero, configuration: configuration)
         newWebView.allowsBackForwardNavigationGestures = true

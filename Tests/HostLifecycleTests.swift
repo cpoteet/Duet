@@ -997,6 +997,7 @@ struct HostLifecycleTests {
         let presenter = RecordingNotificationPresenter(initial: .granted, afterRequest: .granted)
 
         let configuration = WKWebViewConfiguration()
+        configuration.preferences.inactiveSchedulingPolicy = .none
         let bridge = NotificationBridge(service: .claude, presenter: presenter)
         let watcher = WKUserScript(
             source: NotificationScript.responseWatcherSource(
@@ -1053,7 +1054,7 @@ struct HostLifecycleTests {
     ) async throws -> NotificationFixtureOutcome {
         let configuration = WKWebViewConfiguration()
         let bridge = NotificationBridge(service: .claude, presenter: presenter)
-        bridge.install(in: configuration.userContentController)
+        bridge.install(in: configuration)
         let webView = WKWebView(
             frame: NSRect(x: 0, y: 0, width: 800, height: 600),
             configuration: configuration

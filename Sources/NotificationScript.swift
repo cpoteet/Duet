@@ -182,7 +182,7 @@ enum NotificationScript {
           const indicatorSelectors = \(jsonArray(indicatorSelectors));
           let wasGenerating = false;
           let generatingSince = 0;
-          setInterval(() => {
+          const evaluateState = () => {
             let generating = false;
             try {
               generating = indicatorSelectors.some(selector => document.querySelector(selector));
@@ -198,7 +198,17 @@ enum NotificationScript {
             if (now - generatingSince >= \(minimumGenerationMilliseconds)) {
               bridge.postMessage({ type: "responseComplete" }).catch(() => {});
             }
-          }, \(pollIntervalMilliseconds));
+          };
+          // Mutations drive detection so state changes register even while
+          // WebKit throttles timers in hidden views; the interval is only a
+          // low-frequency heartbeat.
+          new MutationObserver(evaluateState).observe(document.documentElement, {
+            childList: true,
+            subtree: true,
+            attributes: true
+          });
+          setInterval(evaluateState, \(pollIntervalMilliseconds));
+          evaluateState();
         })();
         """
     }

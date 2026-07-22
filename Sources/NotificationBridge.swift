@@ -27,7 +27,11 @@ final class NotificationBridge: NSObject {
         super.init()
     }
 
-    func install(in userContentController: WKUserContentController) {
+    func install(in configuration: WKWebViewConfiguration) {
+        // Hidden or minimized web views must keep running their timers, or the
+        // response watcher would stop exactly when its notifications matter.
+        configuration.preferences.inactiveSchedulingPolicy = .none
+        let userContentController = configuration.userContentController
         let script = WKUserScript(
             source: NotificationScript.source(
                 initialPermission: presenter.cachedPermission,

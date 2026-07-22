@@ -11,6 +11,7 @@ protocol UserNotificationPresenting: AnyObject {
     func currentPermission() async -> NotificationPermission
     func requestPermission() async -> NotificationPermission
     func show(_ request: NotificationShowRequest, from service: ChatService)
+    func notifyResponseCompletion(for service: ChatService)
 }
 
 /// Connects one provider web view's injected Notification shim to native
@@ -36,6 +37,15 @@ final class NotificationBridge: NSObject {
             forMainFrameOnly: true
         )
         userContentController.addUserScript(script)
+        let responseWatcher = WKUserScript(
+            source: NotificationScript.responseWatcherSource(
+                indicatorSelectors: ProviderAdapter.adapter(for: service).generationIndicatorSelectors,
+                allowedHosts: service.webNotificationHosts
+            ),
+            injectionTime: .atDocumentEnd,
+            forMainFrameOnly: true
+        )
+        userContentController.addUserScript(responseWatcher)
         userContentController.addScriptMessageHandler(
             self,
             contentWorld: .page,
@@ -58,6 +68,9 @@ extension NotificationBridge: WKScriptMessageHandlerWithReply {
         case .show(let request):
             presenter.show(request, from: service)
             return (nil, nil)
+        case .responseComplete:
+            presenter.notifyResponseCompletion(for: service)
+            return (nil, nil)
         }
     }
 }
@@ -75,6 +88,7 @@ final class DuetNotificationManager: NSObject, UserNotificationPresenting {
 
     private(set) var cachedPermission: NotificationPermission
     private var revealWorkspace: ((ChatService) -> Void)?
+    private var lastSiteNotificationDates: [ChatService: Date] = [:]
 
     private override init() {
         let stored = UserDefaults.standard.string(forKey: Self.permissionDefaultsKey)
@@ -104,9 +118,42 @@ final class DuetNotificationManager: NSObject, UserNotificationPresenting {
         return await currentPermission()
     }
 
+    /// Fires when Duet's response watcher sees a provider finish generating.
+    /// Skips situations the user is already watching, and defers to a site
+    /// notification that just covered the same completion.
+    func notifyResponseCompletion(for service: ChatService) {
+        let workspaceWindow = DuetWindowRegistry.visibleWorkspaceWindow()
+        let shouldNotify = ResponseCompletionPolicy.shouldNotify(
+            isEnabled: responseCompletionNotificationsEnabled,
+            isAppActive: NSApp.isActive,
+            isWorkspaceVisible: workspaceWindow.map { $0.isVisible && !$0.isMiniaturized } ?? false,
+            secondsSinceSiteNotification: lastSiteNotificationDates[service]
+                .map { Date().timeIntervalSince($0) }
+        )
+        guard shouldNotify else { return }
+        show(
+            NotificationShowRequest(
+                title: service.title,
+                body: "Finished responding",
+                tag: "duet-response-complete"
+            ),
+            from: service
+        )
+    }
+
+    private var responseCompletionNotificationsEnabled: Bool {
+        UserDefaults.standard.object(forKey: AppPreferenceKey.responseCompletionNotifications)
+            as? Bool ?? true
+    }
+
     func show(_ request: NotificationShowRequest, from service: ChatService) {
+        lastSiteNotificationDates[service] = Date()
         Task { @MainActor in
-            guard await self.currentPermission() == .granted else { return }
+            var permission = await self.currentPermission()
+            if permission == .undetermined {
+                permission = await self.requestPermission()
+            }
+            guard permission == .granted else { return }
 
             let content = UNMutableNotificationContent()
             content.title = request.title.isEmpty ? service.title : request.title

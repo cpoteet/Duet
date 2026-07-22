@@ -21,6 +21,7 @@ enum NotificationBridgeMessage: Equatable {
     case permission
     case requestPermission
     case show(NotificationShowRequest)
+    case responseComplete
 
     init?(body: Any) {
         guard let dictionary = body as? [String: Any],
@@ -30,6 +31,8 @@ enum NotificationBridgeMessage: Equatable {
             self = .permission
         case "requestPermission":
             self = .requestPermission
+        case "responseComplete":
+            self = .responseComplete
         case "show":
             guard let title = dictionary["title"] as? String else { return nil }
             self = .show(NotificationShowRequest(
@@ -40,6 +43,28 @@ enum NotificationBridgeMessage: Equatable {
         default:
             return nil
         }
+    }
+}
+
+/// Decides whether a detected response completion should produce a native
+/// notification. Kept free of AppKit so the rules stay unit-testable.
+enum ResponseCompletionPolicy {
+    /// A site notification that just arrived for the same provider already
+    /// covers the completion; suppress the duplicate inside this window.
+    static let siteNotificationSuppressionWindow: TimeInterval = 10
+
+    static func shouldNotify(
+        isEnabled: Bool,
+        isAppActive: Bool,
+        isWorkspaceVisible: Bool,
+        secondsSinceSiteNotification: TimeInterval?
+    ) -> Bool {
+        guard isEnabled else { return false }
+        if let secondsSinceSiteNotification,
+           secondsSinceSiteNotification < siteNotificationSuppressionWindow {
+            return false
+        }
+        return !isAppActive || !isWorkspaceVisible
     }
 }
 
@@ -130,6 +155,50 @@ enum NotificationScript {
           }
 
           bridge.postMessage({ type: "permission" }).then(acceptPermission, () => {});
+        })();
+        """
+    }
+
+    /// Generates the watcher that detects a provider response finishing and
+    /// reports it over the bridge. Providers whose sites refuse to use the
+    /// in-page Notification API (they require an unobtainable Web Push
+    /// subscription) still get native completion notifications this way.
+    static func responseWatcherSource(
+        indicatorSelectors: [String],
+        allowedHosts: [String],
+        pollIntervalMilliseconds: Int = 600,
+        minimumGenerationMilliseconds: Int = 1500
+    ) -> String {
+        """
+        (() => {
+          if (window.__duetResponseWatcherInstalled) return;
+          const bridge = window.webkit?.messageHandlers?.\(handlerName);
+          if (!bridge) return;
+          const allowedHosts = \(jsonArray(allowedHosts));
+          const host = (location.hostname || "").toLowerCase();
+          if (!allowedHosts.some(domain => host === domain || host.endsWith("." + domain))) return;
+          window.__duetResponseWatcherInstalled = true;
+
+          const indicatorSelectors = \(jsonArray(indicatorSelectors));
+          let wasGenerating = false;
+          let generatingSince = 0;
+          setInterval(() => {
+            let generating = false;
+            try {
+              generating = indicatorSelectors.some(selector => document.querySelector(selector));
+            } catch (_) {}
+            const now = Date.now();
+            if (generating) {
+              if (!wasGenerating) generatingSince = now;
+              wasGenerating = true;
+              return;
+            }
+            if (!wasGenerating) return;
+            wasGenerating = false;
+            if (now - generatingSince >= \(minimumGenerationMilliseconds)) {
+              bridge.postMessage({ type: "responseComplete" }).catch(() => {});
+            }
+          }, \(pollIntervalMilliseconds));
         })();
         """
     }

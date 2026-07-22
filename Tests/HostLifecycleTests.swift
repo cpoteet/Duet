@@ -53,6 +53,12 @@ private final class RecordingNotificationPresenter: UserNotificationPresenting {
     func show(_ request: NotificationShowRequest, from service: ChatService) {
         shown.append(Shown(request: request, service: service))
     }
+
+    private(set) var completions: [ChatService] = []
+
+    func notifyResponseCompletion(for service: ChatService) {
+        completions.append(service)
+    }
 }
 
 @MainActor
@@ -537,6 +543,7 @@ struct HostLifecycleTests {
             try await testExistingDraftProtection(failures: &failures)
             try await testSignedOutFixture(failures: &failures)
             try await testNotificationBridgeFixture(failures: &failures)
+            try await testResponseWatcherFixture(failures: &failures)
         } catch {
             failures.append("Fixture integration test threw: \(error)")
         }
@@ -982,6 +989,60 @@ struct HostLifecycleTests {
         )
         expect(!foreign.bridgeInstalled, "Non-provider origins must not receive the Duet notification bridge", failures: &failures)
         expect(foreignPresenter.shown.isEmpty, "Non-provider origins must not reach the native presenter", failures: &failures)
+    }
+
+    @MainActor
+    private static func testResponseWatcherFixture(failures: inout [String]) async throws {
+        let fixtureHTML = try String(contentsOf: fixtureURL("streaming-response.html"), encoding: .utf8)
+        let presenter = RecordingNotificationPresenter(initial: .granted, afterRequest: .granted)
+
+        let configuration = WKWebViewConfiguration()
+        let bridge = NotificationBridge(service: .claude, presenter: presenter)
+        let watcher = WKUserScript(
+            source: NotificationScript.responseWatcherSource(
+                indicatorSelectors: ProviderAdapter.adapter(for: .claude).generationIndicatorSelectors,
+                allowedHosts: ChatService.claude.webNotificationHosts,
+                pollIntervalMilliseconds: 50,
+                minimumGenerationMilliseconds: 200
+            ),
+            injectionTime: .atDocumentEnd,
+            forMainFrameOnly: true
+        )
+        configuration.userContentController.addUserScript(watcher)
+        configuration.userContentController.addScriptMessageHandler(
+            bridge,
+            contentWorld: .page,
+            name: NotificationScript.handlerName
+        )
+        let webView = WKWebView(
+            frame: NSRect(x: 0, y: 0, width: 800, height: 600),
+            configuration: configuration
+        )
+        let loader = FixtureLoader()
+        defer {
+            webView.navigationDelegate = nil
+            webView.stopLoading()
+        }
+        try await loader.loadHTML(fixtureHTML, baseURL: URL(string: "https://claude.ai")!, in: webView)
+
+        let deadline = Date().addingTimeInterval(5)
+        while Date() < deadline, presenter.completions.isEmpty {
+            try await Task.sleep(for: .milliseconds(50))
+        }
+        expect(
+            presenter.completions == [.claude],
+            "A finished streaming response must report exactly one completion",
+            failures: &failures
+        )
+
+        // A short flicker of the streaming indicator must not notify.
+        _ = try await evaluate("(window.flickerStreaming(60), true)", in: webView) as Bool
+        try await Task.sleep(for: .milliseconds(600))
+        expect(
+            presenter.completions == [.claude],
+            "A brief streaming flicker must not produce a completion notification",
+            failures: &failures
+        )
     }
 
     @MainActor

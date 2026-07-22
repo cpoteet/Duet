@@ -100,12 +100,81 @@ struct CoreTests {
                 == .show(NotificationShowRequest(title: "Done", body: "", tag: "")),
             "Show message must tolerate missing optional fields"
         )
+        expect(
+            NotificationBridgeMessage(body: ["type": "responseComplete"]) == .responseComplete,
+            "Response completion message was not parsed"
+        )
         expect(NotificationBridgeMessage(body: ["type": "show"]) == nil, "Show message without a title must be rejected")
         expect(NotificationBridgeMessage(body: ["type": "unknown"]) == nil, "Unknown message types must be rejected")
         expect(NotificationBridgeMessage(body: "show") == nil, "Non-dictionary messages must be rejected")
         expect(NotificationBridgeMessage(body: ["type": 3]) == nil, "Non-string message types must be rejected")
 
-        let fixtures = ["textarea.html", "contenteditable.html", "signed-out.html", "login-discussion.html", "delayed-send.html", "notifications.html"]
+        for service in ChatService.allCases {
+            let adapter = ProviderAdapter.adapter(for: service)
+            expect(!adapter.generationIndicatorSelectors.isEmpty, "\(service.title) has no generation indicators")
+            let watcher = NotificationScript.responseWatcherSource(
+                indicatorSelectors: adapter.generationIndicatorSelectors,
+                allowedHosts: service.webNotificationHosts
+            )
+            expect(watcher.contains("responseComplete"), "\(service.title) watcher does not report completions")
+            expect(watcher.contains("messageHandlers?.duetNotifications"), "\(service.title) watcher does not target the bridge handler")
+            for selector in adapter.generationIndicatorSelectors {
+                expect(watcher.contains(selector), "\(service.title) watcher does not check \(selector)")
+            }
+            for host in service.webNotificationHosts {
+                expect(watcher.contains(host), "\(service.title) watcher does not restrict itself to \(host)")
+            }
+        }
+        expect(
+            ProviderAdapter.adapter(for: .claude).generationIndicatorSelectors
+                .contains("[data-is-streaming='true']"),
+            "Claude watcher must use the streaming attribute"
+        )
+
+        expect(
+            ResponseCompletionPolicy.shouldNotify(
+                isEnabled: true, isAppActive: false, isWorkspaceVisible: true,
+                secondsSinceSiteNotification: nil
+            ),
+            "A completion while Duet is inactive must notify"
+        )
+        expect(
+            ResponseCompletionPolicy.shouldNotify(
+                isEnabled: true, isAppActive: true, isWorkspaceVisible: false,
+                secondsSinceSiteNotification: nil
+            ),
+            "A completion with the workspace hidden must notify"
+        )
+        expect(
+            !ResponseCompletionPolicy.shouldNotify(
+                isEnabled: true, isAppActive: true, isWorkspaceVisible: true,
+                secondsSinceSiteNotification: nil
+            ),
+            "A completion the user is watching must not notify"
+        )
+        expect(
+            !ResponseCompletionPolicy.shouldNotify(
+                isEnabled: false, isAppActive: false, isWorkspaceVisible: false,
+                secondsSinceSiteNotification: nil
+            ),
+            "A disabled preference must suppress completion notifications"
+        )
+        expect(
+            !ResponseCompletionPolicy.shouldNotify(
+                isEnabled: true, isAppActive: false, isWorkspaceVisible: false,
+                secondsSinceSiteNotification: 5
+            ),
+            "A fresh site notification must suppress the duplicate completion"
+        )
+        expect(
+            ResponseCompletionPolicy.shouldNotify(
+                isEnabled: true, isAppActive: false, isWorkspaceVisible: false,
+                secondsSinceSiteNotification: 30
+            ),
+            "An old site notification must not suppress a new completion"
+        )
+
+        let fixtures = ["textarea.html", "contenteditable.html", "signed-out.html", "login-discussion.html", "delayed-send.html", "notifications.html", "streaming-response.html"]
         let fixtureDirectory = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
             .appendingPathComponent("Tests/Fixtures")
         for fixture in fixtures {

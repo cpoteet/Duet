@@ -1,5 +1,10 @@
 import Foundation
 
+enum AppPreferenceKey {
+    static let keepProvidersLoaded = "keepProvidersLoaded"
+    static let responseCompletionNotifications = "responseCompletionNotifications"
+}
+
 enum ChatService: String, CaseIterable, Identifiable, Hashable {
     case chatGPT
     case claude

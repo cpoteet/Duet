@@ -1,0 +1,17 @@
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><title>Streaming response fixture</title></head>
+<body>
+<div id="message" data-is-streaming="true">Streaming…</div>
+<script>
+setTimeout(() => {
+  document.getElementById("message").setAttribute("data-is-streaming", "false");
+}, 400);
+window.flickerStreaming = milliseconds => {
+  const message = document.getElementById("message");
+  message.setAttribute("data-is-streaming", "true");
+  setTimeout(() => message.setAttribute("data-is-streaming", "false"), milliseconds);
+};
+</script>
+</body>
+</html>

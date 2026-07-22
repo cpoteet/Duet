@@ -4,6 +4,8 @@ struct ProviderAdapter {
     let composerSelectors: [String]
     let sendButtonSelectors: [String]
     let userMessageSelectors: [String]
+    /// Elements present only while the provider is generating a response.
+    let generationIndicatorSelectors: [String]
 
     static func adapter(for service: ChatService) -> ProviderAdapter {
         switch service {
@@ -24,6 +26,11 @@ struct ProviderAdapter {
                 ],
                 userMessageSelectors: [
                     "[data-message-author-role='user']"
+                ],
+                generationIndicatorSelectors: [
+                    "button[data-testid='stop-button']",
+                    "button[aria-label='Stop streaming']",
+                    "button[aria-label='Stop generating']"
                 ]
             )
         case .claude:
@@ -43,6 +50,10 @@ struct ProviderAdapter {
                 userMessageSelectors: [
                     "[data-testid='user-message']",
                     "[data-is-streaming='false'] .font-user-message"
+                ],
+                generationIndicatorSelectors: [
+                    "[data-is-streaming='true']",
+                    "button[aria-label='Stop response']"
                 ]
             )
         }

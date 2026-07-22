@@ -9,6 +9,7 @@ final class DuetApplicationDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.regular)
+        DuetNotificationManager.shared.start()
     }
 
     func configureQuickPrompt(with appState: AppState, reopenWorkspace: @escaping () -> Void) {

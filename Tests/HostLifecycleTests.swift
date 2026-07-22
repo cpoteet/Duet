@@ -136,6 +136,58 @@ struct HostLifecycleTests {
             "Old host removed a WKWebView after it moved to the split-pane host"
         )
 
+        expect(
+            NotificationMessageOriginPolicy.allows(
+                isMainFrame: true,
+                scheme: "https",
+                host: "chatgpt.com",
+                allowedHosts: ChatService.chatGPT.webNotificationHosts
+            ),
+            "A provider main-frame origin should reach its notification bridge"
+        )
+        expect(
+            !NotificationMessageOriginPolicy.allows(
+                isMainFrame: false,
+                scheme: "https",
+                host: "chatgpt.com",
+                allowedHosts: ChatService.chatGPT.webNotificationHosts
+            ),
+            "A provider subframe must not reach the notification bridge"
+        )
+        expect(
+            !NotificationMessageOriginPolicy.allows(
+                isMainFrame: true,
+                scheme: "https",
+                host: "chatgpt.com.evil.example",
+                allowedHosts: ChatService.chatGPT.webNotificationHosts
+            ),
+            "A spoofed provider suffix must not reach the notification bridge"
+        )
+        expect(
+            !NotificationMessageOriginPolicy.allows(
+                isMainFrame: true,
+                scheme: "http",
+                host: "chatgpt.com",
+                allowedHosts: ChatService.chatGPT.webNotificationHosts
+            ),
+            "A non-HTTPS provider origin must not reach the notification bridge"
+        )
+
+        let revealRouter = NotificationRevealRouter()
+        var routedServices: [ChatService] = []
+        revealRouter.route(.claude)
+        expect(routedServices.isEmpty, "A cold-start notification route should wait for the workspace")
+        revealRouter.register { routedServices.append($0) }
+        expect(
+            routedServices == [.claude],
+            "A cold-start notification route should resume when the workspace becomes available"
+        )
+        revealRouter.route(.chatGPT)
+        expect(
+            routedServices == [.claude, .chatGPT],
+            "Notification routes should be delivered immediately after workspace registration"
+        )
+
         let attachedWindow = NSWindow(
             contentRect: .init(x: 0, y: 0, width: 400, height: 400),
             styleMask: [.titled],
@@ -989,6 +1041,44 @@ struct HostLifecycleTests {
         )
         expect(!foreign.bridgeInstalled, "Non-provider origins must not receive the Duet notification bridge", failures: &failures)
         expect(foreignPresenter.shown.isEmpty, "Non-provider origins must not reach the native presenter", failures: &failures)
+        try await testDirectForeignBridgeAttempt(failures: &failures)
+    }
+
+    @MainActor
+    private static func testDirectForeignBridgeAttempt(failures: inout [String]) async throws {
+        let presenter = RecordingNotificationPresenter(initial: .granted, afterRequest: .granted)
+        let configuration = WKWebViewConfiguration()
+        let bridge = NotificationBridge(service: .claude, presenter: presenter)
+        bridge.install(in: configuration)
+        let webView = WKWebView(
+            frame: NSRect(x: 0, y: 0, width: 800, height: 600),
+            configuration: configuration
+        )
+        let loader = FixtureLoader()
+        defer {
+            webView.navigationDelegate = nil
+            webView.stopLoading()
+        }
+        try await loader.loadHTML("<html><body>Foreign</body></html>", baseURL: URL(string: "https://example.com")!, in: webView)
+
+        let handlerWasVisible: Bool = try await evaluate(
+            """
+            (() => {
+              const handler = window.webkit?.messageHandlers?.duetNotifications;
+              if (!handler) return false;
+              handler.postMessage({ type: "show", title: "Spoofed" }).catch(() => {});
+              return true;
+            })()
+            """,
+            in: webView
+        )
+        try await Task.sleep(for: .milliseconds(100))
+        expect(handlerWasVisible, "The foreign-origin test must exercise the registered native handler", failures: &failures)
+        expect(
+            presenter.shown.isEmpty,
+            "A foreign origin must be rejected even when it calls the native handler directly",
+            failures: &failures
+        )
     }
 
     @MainActor

@@ -14,6 +14,46 @@ protocol UserNotificationPresenting: AnyObject {
     func notifyResponseCompletion(for service: ChatService)
 }
 
+enum NotificationMessageOriginPolicy {
+    static func allows(
+        isMainFrame: Bool,
+        scheme: String,
+        host: String,
+        allowedHosts: [String]
+    ) -> Bool {
+        guard isMainFrame, scheme.lowercased() == "https" else { return false }
+        let normalizedHost = host.lowercased()
+        return allowedHosts.contains { domain in
+            let normalizedDomain = domain.lowercased()
+            return normalizedHost == normalizedDomain
+                || normalizedHost.hasSuffix(".\(normalizedDomain)")
+        }
+    }
+}
+
+@MainActor
+final class NotificationRevealRouter {
+    private var revealWorkspace: ((ChatService) -> Void)?
+    private var pendingService: ChatService?
+
+    func register(_ revealWorkspace: @escaping (ChatService) -> Void) {
+        guard self.revealWorkspace == nil else { return }
+        self.revealWorkspace = revealWorkspace
+        if let pendingService {
+            self.pendingService = nil
+            revealWorkspace(pendingService)
+        }
+    }
+
+    func route(_ service: ChatService) {
+        guard let revealWorkspace else {
+            pendingService = service
+            return
+        }
+        revealWorkspace(service)
+    }
+}
+
 /// Connects one provider web view's injected Notification shim to native
 /// macOS notifications.
 @MainActor
@@ -63,6 +103,13 @@ extension NotificationBridge: WKScriptMessageHandlerWithReply {
         _ userContentController: WKUserContentController,
         didReceive message: WKScriptMessage
     ) async -> (Any?, String?) {
+        let origin = message.frameInfo.securityOrigin
+        guard NotificationMessageOriginPolicy.allows(
+            isMainFrame: message.frameInfo.isMainFrame,
+            scheme: origin.protocol,
+            host: origin.host,
+            allowedHosts: service.webNotificationHosts
+        ) else { return (nil, nil) }
         guard let parsed = NotificationBridgeMessage(body: message.body) else { return (nil, nil) }
         switch parsed {
         case .permission:
@@ -91,7 +138,7 @@ final class DuetNotificationManager: NSObject, UserNotificationPresenting {
     private nonisolated static let serviceUserInfoKey = "duet.service"
 
     private(set) var cachedPermission: NotificationPermission
-    private var revealWorkspace: ((ChatService) -> Void)?
+    private let revealRouter = NotificationRevealRouter()
     private var lastSiteNotificationDates: [ChatService: Date] = [:]
 
     private override init() {
@@ -100,13 +147,17 @@ final class DuetNotificationManager: NSObject, UserNotificationPresenting {
         super.init()
     }
 
-    /// Called once from the app scene. Registers for click handling and
-    /// refreshes the cached permission used to seed injected shims.
-    func configure(revealWorkspace: @escaping (ChatService) -> Void) {
-        guard self.revealWorkspace == nil else { return }
-        self.revealWorkspace = revealWorkspace
+    /// Called during application launch, before notification responses can be
+    /// delivered. The workspace callback may be registered later by SwiftUI.
+    func start() {
         UNUserNotificationCenter.current().delegate = self
         Task { _ = await currentPermission() }
+    }
+
+    /// Registers workspace routing once the shared app state is available.
+    /// A notification click received during launch is delivered immediately.
+    func configure(revealWorkspace: @escaping (ChatService) -> Void) {
+        revealRouter.register(revealWorkspace)
     }
 
     func currentPermission() async -> NotificationPermission {
@@ -135,7 +186,7 @@ final class DuetNotificationManager: NSObject, UserNotificationPresenting {
                 .map { Date().timeIntervalSince($0) }
         )
         guard shouldNotify else { return }
-        show(
+        post(
             NotificationShowRequest(
                 title: service.title,
                 body: "Finished responding",
@@ -152,6 +203,10 @@ final class DuetNotificationManager: NSObject, UserNotificationPresenting {
 
     func show(_ request: NotificationShowRequest, from service: ChatService) {
         lastSiteNotificationDates[service] = Date()
+        post(request, from: service)
+    }
+
+    private func post(_ request: NotificationShowRequest, from service: ChatService) {
         Task { @MainActor in
             var permission = await self.currentPermission()
             if permission == .undetermined {
@@ -211,7 +266,7 @@ extension DuetNotificationManager: UNUserNotificationCenterDelegate {
             .userInfo[Self.serviceUserInfoKey] as? String
         guard let rawService, let service = ChatService(rawValue: rawService) else { return }
         await MainActor.run {
-            self.revealWorkspace?(service)
+            self.revealRouter.route(service)
         }
     }
 }

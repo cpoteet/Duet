@@ -42,6 +42,11 @@ final class BrowserController: NSObject, ObservableObject {
         newWebView.allowsBackForwardNavigationGestures = true
         newWebView.navigationDelegate = self
         newWebView.uiDelegate = self
+        // WKWebView otherwise paints an opaque white base before its document
+        // has a chance to render. Duet is a personal, non-App Store app and
+        // already uses a guarded private WebKit close hook for released pages,
+        // so use the matching KVC hook here to expose the native host canvas.
+        newWebView.setValue(false, forKey: "drawsBackground")
         newWebView.underPageBackgroundColor = .clear
         webView = newWebView
         hasRetriedBlankInitialClaudeLoad = false
@@ -651,6 +656,11 @@ extension BrowserController: WKUIDelegate {
 }
 
 final class BrowserHostView: NSView {
+    private enum Canvas {
+        static let dark = NSColor(red: 0.055, green: 0.06, blue: 0.07, alpha: 1)
+        static let light = NSColor(red: 0.955, green: 0.952, blue: 0.94, alpha: 1)
+    }
+
     // The browser controller owns the web view. The host only tracks the view
     // while it is mounted so a cached SwiftUI host cannot keep a released
     // provider page and its WebContent process alive.
@@ -658,6 +668,21 @@ final class BrowserHostView: NSView {
     private var acceptsKeyboardInput = true
     private var windowAttachmentTask: Task<Void, Never>?
     var onWindowAttachment: (() -> Void)?
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        configureCanvas()
+    }
+
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        configureCanvas()
+    }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        updateCanvasColor()
+    }
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
@@ -756,6 +781,16 @@ final class BrowserHostView: NSView {
               let firstResponder = window.firstResponder as? NSView,
               firstResponder === hostedWebView || firstResponder.isDescendant(of: hostedWebView) else { return }
         window.makeFirstResponder(nil)
+    }
+
+    private func configureCanvas() {
+        wantsLayer = true
+        updateCanvasColor()
+    }
+
+    private func updateCanvasColor() {
+        let isDark = effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+        layer?.backgroundColor = (isDark ? Canvas.dark : Canvas.light).cgColor
     }
 }
 

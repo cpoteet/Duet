@@ -422,9 +422,34 @@ struct HostLifecycleTests {
             "download:decideDestinationUsingResponse:suggestedFilename:completionHandler:"
         )
         let browserController = BrowserController(service: .chatGPT)
+        let preparedWebView = browserController.prepare()
         expect(
-            browserController.prepare().underPageBackgroundColor.alphaComponent == 0,
+            (preparedWebView.value(forKey: "drawsBackground") as? Bool) == false,
+            "Provider web views should expose the native host canvas while loading"
+        )
+        expect(
+            preparedWebView.underPageBackgroundColor.alphaComponent == 0,
             "Provider web views should use the supported transparent background property"
+        )
+        let darkCanvasHost = BrowserHostView(frame: .init(x: 0, y: 0, width: 400, height: 400))
+        darkCanvasHost.appearance = NSAppearance(named: .darkAqua)
+        darkCanvasHost.viewDidChangeEffectiveAppearance()
+        let darkCanvasColor = darkCanvasHost.layer?.backgroundColor
+        expect(
+            darkCanvasHost.wantsLayer && darkCanvasColor?.alpha == 1,
+            "Browser hosts should provide an opaque canvas behind transparent provider web views"
+        )
+        expect(
+            (darkCanvasColor?.components?.prefix(3).max() ?? 1) < 0.2,
+            "Browser hosts should use a dark loading canvas in dark appearance"
+        )
+        darkCanvasHost.appearance = NSAppearance(named: .aqua)
+        darkCanvasHost.viewDidChangeEffectiveAppearance()
+        let lightCanvasColor = darkCanvasHost.layer?.backgroundColor
+        expect(
+            lightCanvasColor?.alpha == 1
+                && (lightCanvasColor?.components?.prefix(3).min() ?? 0) > 0.9,
+            "Browser hosts should preserve a light loading canvas in light appearance"
         )
         expect(
             browserController.responds(to: filePickerSelector),

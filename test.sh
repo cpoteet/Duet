@@ -36,6 +36,7 @@ xcrun swiftc \
   "$ROOT/Sources/ProviderAdapter.swift" \
   "$ROOT/Sources/NotificationScript.swift" \
   "$ROOT/Sources/NotificationBridge.swift" \
+  "$ROOT/Sources/PrintingBridge.swift" \
   "$ROOT/Sources/WebBrowser.swift" \
   "$ROOT/Sources/AppState.swift" \
   "$ROOT/Sources/WindowIdentity.swift" \

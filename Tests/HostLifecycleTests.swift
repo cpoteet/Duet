@@ -62,6 +62,15 @@ private final class RecordingNotificationPresenter: UserNotificationPresenting {
 }
 
 @MainActor
+private final class RecordingPrintPresenter: WebPagePrintPresenting {
+    private(set) var requestedWebViews: [WKWebView] = []
+
+    func presentPrintPanel(for webView: WKWebView) {
+        requestedWebViews.append(webView)
+    }
+}
+
+@MainActor
 private final class FixtureLoader: NSObject, WKNavigationDelegate {
     private var continuation: CheckedContinuation<Void, Error>?
 
@@ -619,6 +628,7 @@ struct HostLifecycleTests {
             try await testRepeatedPromptConfirmation(failures: &failures)
             try await testExistingDraftProtection(failures: &failures)
             try await testSignedOutFixture(failures: &failures)
+            try await testPrintingBridgeFixture(failures: &failures)
             try await testNotificationBridgeFixture(failures: &failures)
             try await testResponseWatcherFixture(failures: &failures)
         } catch {
@@ -1013,6 +1023,97 @@ struct HostLifecycleTests {
         try await discussionLoader.load(fixtureURL("login-discussion.html"), in: discussionWebView)
         let discussionRequiresLogin: Bool = try await evaluate(adapter.loginRequiredScript(), in: discussionWebView)
         expect(!discussionRequiresLogin, "Conversation text should not be mistaken for a sign-in screen", failures: &failures)
+    }
+
+    @MainActor
+    private static func testPrintingBridgeFixture(failures: inout [String]) async throws {
+        let presenter = RecordingPrintPresenter()
+        let configuration = WKWebViewConfiguration()
+        let bridge = PrintingBridge(service: .claude, presenter: presenter)
+        bridge.install(in: configuration)
+        let webView = WKWebView(
+            frame: NSRect(x: 0, y: 0, width: 800, height: 600),
+            configuration: configuration
+        )
+        let loader = FixtureLoader()
+        defer {
+            webView.navigationDelegate = nil
+            webView.stopLoading()
+        }
+
+        try await loader.loadHTML(
+            """
+            <html><body>
+              <article id="recipe">
+                <button id="mainPrint" onclick="window.print()">Print</button>
+                <h2>Ingredients</h2><p>Noodles</p>
+                <h2>Steps</h2><p>Cook</p>
+              </article>
+              <iframe id="card" srcdoc='<section><button id="cardPrint">Print recipe</button></section>'></iframe>
+            </body></html>
+            """,
+            baseURL: URL(string: "https://claude.ai")!,
+            in: webView
+        )
+        let bridgeInstalled: Bool = try await evaluate(
+            "Boolean(window.__duetPrintingBridgeInstalled)",
+            in: webView
+        )
+        expect(bridgeInstalled, "Provider pages must receive Duet's printing bridge", failures: &failures)
+
+        _ = try await evaluate("(document.getElementById('mainPrint').click(), true)", in: webView) as Bool
+        try await Task.sleep(for: .milliseconds(100))
+        expect(
+            presenter.requestedWebViews.count == 1 && presenter.requestedWebViews.first === webView,
+            "A provider window.print() call must request native printing for its WKWebView",
+            failures: &failures
+        )
+        let markedRecipe: Bool = try await evaluate(
+            "document.getElementById('recipe').hasAttribute('data-duet-print-root')",
+            in: webView
+        )
+        expect(markedRecipe, "The clicked recipe card must become the printable region", failures: &failures)
+
+        _ = try await evaluate(
+            "(document.getElementById('card').contentDocument.getElementById('cardPrint').click(), true)",
+            in: webView
+        ) as Bool
+        try await Task.sleep(for: .milliseconds(900))
+        expect(
+            presenter.requestedWebViews.count == 2 && presenter.requestedWebViews.last === webView,
+            "A provider child frame window.print() call must request native printing for its WKWebView",
+            failures: &failures
+        )
+
+        try await loader.loadHTML(
+            "<html><body>Foreign</body></html>",
+            baseURL: URL(string: "https://example.com")!,
+            in: webView
+        )
+        let foreignBridgeInstalled: Bool = try await evaluate(
+            "Boolean(window.__duetPrintingBridgeInstalled)",
+            in: webView
+        )
+        expect(!foreignBridgeInstalled, "Foreign pages must not receive Duet's printing shim", failures: &failures)
+
+        let handlerWasVisible: Bool = try await evaluate(
+            """
+            (() => {
+              const handler = window.webkit?.messageHandlers?.duetPrint;
+              if (!handler) return false;
+              handler.postMessage(null).catch(() => {});
+              return true;
+            })()
+            """,
+            in: webView
+        )
+        try await Task.sleep(for: .milliseconds(100))
+        expect(handlerWasVisible, "The foreign print test must exercise the native handler", failures: &failures)
+        expect(
+            presenter.requestedWebViews.count == 2,
+            "A foreign origin must not reach Duet's native print presenter",
+            failures: &failures
+        )
     }
 
     @MainActor

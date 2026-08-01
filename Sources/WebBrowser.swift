@@ -14,6 +14,7 @@ final class BrowserController: NSObject, ObservableObject {
         service: service,
         presenter: DuetNotificationManager.shared
     )
+    private lazy var printingBridge = PrintingBridge(service: service, presenter: self)
     private var hasRetriedBlankInitialClaudeLoad = false
     // WebKit ends a main-frame navigation with error 102 after converting it
     // into a WKDownload. Preserve the page's prior phase for that exact path.
@@ -37,6 +38,7 @@ final class BrowserController: NSObject, ObservableObject {
         configuration.websiteDataStore = .default()
         configuration.preferences.isElementFullscreenEnabled = true
         notificationBridge.install(in: configuration)
+        printingBridge.install(in: configuration)
 
         let newWebView = WKWebView(frame: .zero, configuration: configuration)
         newWebView.allowsBackForwardNavigationGestures = true
@@ -609,6 +611,28 @@ extension BrowserController: WKDownloadDelegate {
             alert.beginSheetModal(for: window)
         } else {
             alert.runModal()
+        }
+    }
+}
+
+extension BrowserController: WebPagePrintPresenting {
+    func presentPrintPanel(for webView: WKWebView) {
+        guard webView === self.webView else { return }
+
+        let printInfo = NSPrintInfo.shared.copy() as? NSPrintInfo ?? NSPrintInfo.shared
+        let operation = webView.printOperation(with: printInfo)
+        operation.showsPrintPanel = true
+        operation.showsProgressPanel = true
+
+        if let window = webView.window {
+            operation.runModal(
+                for: window,
+                delegate: nil,
+                didRun: nil,
+                contextInfo: nil
+            )
+        } else {
+            operation.run()
         }
     }
 }

@@ -244,8 +244,9 @@ private struct QuickPromptView: View {
         revealWorkspace()
 
         Task {
-            if case .both = target {
-                _ = await appState.waitForSplitWorkspaceMount()
+            guard await appState.waitForQuickPromptWorkspaceMount(for: target.promptTarget) else {
+                appState.reportQuickPromptWorkspaceUnavailable(for: target.promptTarget)
+                return
             }
             let results = await appState.send(
                 prompt: text,

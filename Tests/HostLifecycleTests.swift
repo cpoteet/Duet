@@ -583,7 +583,10 @@ struct HostLifecycleTests {
         expect(workspaceState.isSplitView, "Both destination should use split view")
         workspaceState.browserDidMount(.chatGPT)
         workspaceState.browserDidMount(.claude)
-        let splitWorkspaceMounted = await workspaceState.waitForSplitWorkspaceMount(timeout: 0.01)
+        let splitWorkspaceMounted = await workspaceState.waitForQuickPromptWorkspaceMount(
+            for: .both,
+            timeout: 0.01
+        )
         expect(splitWorkspaceMounted, "Both split-pane browser hosts should mount before quick-prompt dispatch")
         workspaceState.openWorkspace(for: .service(.claude))
         expect(workspaceState.selectedService == .claude, "Later Claude destination should select Claude")
@@ -603,15 +606,47 @@ struct HostLifecycleTests {
         workspaceState.browserDidMount(.chatGPT)
         workspaceState.browserDidMount(.claude)
         workspaceState.openQuickPromptWorkspace(for: .both)
-        let staleSplitWorkspaceMounted = await workspaceState.waitForSplitWorkspaceMount(timeout: 0.01)
+        let staleSplitWorkspaceMounted = await workspaceState.waitForQuickPromptWorkspaceMount(
+            for: .both,
+            timeout: 0.01
+        )
         expect(
             !staleSplitWorkspaceMounted,
             "Recreated split-pane browsers must not inherit stale mount state"
         )
         workspaceState.browserDidMount(.chatGPT)
         workspaceState.browserDidMount(.claude)
-        let recreatedSplitWorkspaceMounted = await workspaceState.waitForSplitWorkspaceMount(timeout: 0.01)
+        let recreatedSplitWorkspaceMounted = await workspaceState.waitForQuickPromptWorkspaceMount(
+            for: .both,
+            timeout: 0.01
+        )
         expect(recreatedSplitWorkspaceMounted, "Recreated split-pane browser hosts should report their new mounts")
+
+        let singleQuickPromptState = AppState()
+        singleQuickPromptState.openQuickPromptWorkspace(for: .service(.claude))
+        singleQuickPromptState.browserDidMount(.chatGPT)
+        let wrongSingleWorkspaceMounted = await singleQuickPromptState.waitForQuickPromptWorkspaceMount(
+            for: .service(.claude),
+            timeout: 0.01
+        )
+        expect(
+            !wrongSingleWorkspaceMounted,
+            "An unrelated browser mount must not start a single-provider Quick Prompt dispatch"
+        )
+        singleQuickPromptState.browserDidMount(.claude)
+        let singleWorkspaceMounted = await singleQuickPromptState.waitForQuickPromptWorkspaceMount(
+            for: .service(.claude),
+            timeout: 0.01
+        )
+        expect(singleWorkspaceMounted, "Claude must mount before a single-provider Quick Prompt dispatch")
+
+        singleQuickPromptState.reportQuickPromptWorkspaceUnavailable(for: .service(.claude))
+        expect(
+            singleQuickPromptState.dispatchNotice?.results == [
+                PromptDispatchResult(service: .claude, outcome: .unavailable)
+            ],
+            "A failed Quick Prompt mount should surface the affected provider without dispatching"
+        )
 
         do {
             try await testComposerFixture(

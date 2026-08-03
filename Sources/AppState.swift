@@ -14,7 +14,7 @@ final class AppState: ObservableObject {
 
     private let browsers: [ChatService: BrowserController]
     private var keepsProvidersLoaded = false
-    private var mountedSplitServices: Set<ChatService> = []
+    private var mountedBrowserServices: Set<ChatService> = []
     private var inactiveBrowserReleaseTask: Task<Void, Never>?
     private var hasCompletedUpdateCheck = false
     private var isCheckingForUpdate = false
@@ -40,11 +40,9 @@ final class AppState: ObservableObject {
         }
     }
 
-    /// Tracks split-pane mounting for quick-prompt dispatch readiness.
+    /// Tracks visible browser mounting for quick-prompt dispatch readiness.
     func browserDidMount(_ service: ChatService) {
-        if isSplitView {
-            mountedSplitServices.insert(service)
-        }
+        mountedBrowserServices.insert(service)
     }
 
     func setKeepsProvidersLoaded(_ enabled: Bool) {
@@ -67,13 +65,13 @@ final class AppState: ObservableObject {
             inactiveBrowserReleaseTask?.cancel()
             inactiveBrowserReleaseTask = nil
             if !wasSplitView {
-                mountedSplitServices.removeAll()
+                mountedBrowserServices.removeAll()
             }
             ChatService.allCases.forEach { _ = browser(for: $0).prepare() }
             isSplitView = true
         } else {
             isSplitView = false
-            mountedSplitServices.removeAll()
+            mountedBrowserServices.removeAll()
             scheduleInactiveBrowserRelease()
         }
     }
@@ -99,7 +97,7 @@ final class AppState: ObservableObject {
     func openQuickPromptWorkspace(for target: PromptTarget) -> Bool {
         guard !hasActiveOperations else { return false }
         let recreatedServices = services(for: target)
-        mountedSplitServices.subtract(recreatedServices)
+        mountedBrowserServices.subtract(recreatedServices)
         recreatedServices.forEach { service in
             browser(for: service).release()
         }
@@ -107,18 +105,19 @@ final class AppState: ObservableObject {
         return true
     }
 
-    /// Lets a quick-prompt split transition finish moving both WebKit views
-    /// into their replacement hosts before either view begins a fresh-chat load.
-    func waitForSplitWorkspaceMount(timeout: TimeInterval = 1.5) async -> Bool {
-        guard isSplitView else { return true }
-
-        let expected = Set(ChatService.allCases)
+    /// Lets a quick-prompt transition mount every destination WebKit view before
+    /// any of them begins a fresh-chat load.
+    func waitForQuickPromptWorkspaceMount(
+        for target: PromptTarget,
+        timeout: TimeInterval = 2.5
+    ) async -> Bool {
+        let expected = Set(services(for: target))
         let deadline = Date().addingTimeInterval(timeout)
         while Date() < deadline {
-            if expected.isSubset(of: mountedSplitServices) { return true }
+            if expected.isSubset(of: mountedBrowserServices) { return true }
             try? await Task.sleep(for: .milliseconds(50))
         }
-        return expected.isSubset(of: mountedSplitServices)
+        return expected.isSubset(of: mountedBrowserServices)
     }
 
     @discardableResult
@@ -202,6 +201,12 @@ final class AppState: ObservableObject {
         let services = services(for: target)
         return Set(services).isDisjoint(with: activeDispatchServices)
             && Set(services).isDisjoint(with: resettingServices)
+    }
+
+    func reportQuickPromptWorkspaceUnavailable(for target: PromptTarget) {
+        dispatchNotice = DispatchNotice(results: services(for: target).map {
+            PromptDispatchResult(service: $0, outcome: .unavailable)
+        })
     }
 
     private func services(for target: PromptTarget) -> [ChatService] {

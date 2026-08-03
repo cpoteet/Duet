@@ -200,6 +200,7 @@ final class BrowserController: NSObject, ObservableObject {
     }
 
     private func hasComposer() async -> Bool {
+        guard phase == .ready else { return false }
         guard service.allowsPromptInjection(at: webView?.url) else { return false }
         return (try? await evaluate(adapter.readinessScript(), as: Bool.self)) ?? false
     }

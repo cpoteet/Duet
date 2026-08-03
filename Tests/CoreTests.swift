@@ -53,6 +53,7 @@ struct CoreTests {
             let baseline = adapter.submissionBaselineScript()
             let confirmation = adapter.submissionConfirmationScript(prompt: "test", baselineMessageCount: 0)
             expect(readiness.contains("document.querySelector"), "\(service.title) readiness script has no selector")
+            expect(readiness.contains("getClientRects"), "\(service.title) readiness script accepts a hidden composer")
             expect(fill.contains("InputEvent"), "\(service.title) fill script does not notify the page")
             expect(fill.contains("composer-not-empty"), "\(service.title) fill script does not protect provider drafts")
             expect(!fill.contains("sendButton.click()"), "\(service.title) fill script must not submit early")

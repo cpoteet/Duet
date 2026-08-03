@@ -63,8 +63,8 @@ struct ProviderAdapter {
         """
         (() => {
           const composerSelectors = \(jsonArray(composerSelectors));
-          const composer = composerSelectors.map(selector => document.querySelector(selector)).find(Boolean);
-          return Boolean(composer && !composer.closest('[aria-hidden="true"]'));
+          const isVisible = element => element && element.getClientRects().length > 0 && !element.closest('[aria-hidden="true"]');
+          return composerSelectors.map(selector => document.querySelector(selector)).some(isVisible);
         })()
         """
     }

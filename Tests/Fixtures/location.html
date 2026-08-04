@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><title>Location bridge fixture</title></head>
+<body>
+<script>
+(async () => {
+  const outcome = {
+    supported: Boolean(navigator.geolocation),
+    bridgeInstalled: Boolean(window.__duetLocationBridgeInstalled),
+    permission: null,
+    latitude: null,
+    longitude: null,
+    accuracy: null,
+    errorCode: null,
+    failure: null
+  };
+  try {
+    if (outcome.bridgeInstalled) {
+      outcome.permission = (await navigator.permissions.query({ name: "geolocation" })).state;
+      await new Promise(resolve => {
+        navigator.geolocation.getCurrentPosition(
+          position => {
+            outcome.latitude = position.coords.latitude;
+            outcome.longitude = position.coords.longitude;
+            outcome.accuracy = position.coords.accuracy;
+            resolve();
+          },
+          error => {
+            outcome.errorCode = error.code;
+            resolve();
+          },
+          { enableHighAccuracy: true }
+        );
+      });
+    }
+  } catch (error) {
+    outcome.failure = String(error);
+  }
+  window.__duetLocationTest = outcome;
+})();
+</script>
+</body>
+</html>

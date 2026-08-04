@@ -25,6 +25,17 @@ private struct NotificationFixtureOutcome: Decodable, Sendable {
     let failure: String?
 }
 
+private struct LocationFixtureOutcome: Decodable, Sendable {
+    let supported: Bool
+    let bridgeInstalled: Bool
+    let permission: String?
+    let latitude: Double?
+    let longitude: Double?
+    let accuracy: Double?
+    let errorCode: Int?
+    let failure: String?
+}
+
 @MainActor
 private final class RecordingNotificationPresenter: UserNotificationPresenting {
     struct Shown {
@@ -58,6 +69,26 @@ private final class RecordingNotificationPresenter: UserNotificationPresenting {
 
     func notifyResponseCompletion(for service: ChatService) {
         completions.append(service)
+    }
+}
+
+@MainActor
+private final class RecordingLocationProvider: LocationProviding {
+    var permissionState: LocationPermissionState
+    private let result: Result<BrowserLocation, LocationProviderError>
+    private(set) var highAccuracyRequests: [Bool] = []
+
+    init(
+        permissionState: LocationPermissionState,
+        result: Result<BrowserLocation, LocationProviderError>
+    ) {
+        self.permissionState = permissionState
+        self.result = result
+    }
+
+    func currentPosition(enableHighAccuracy: Bool) async throws -> BrowserLocation {
+        highAccuracyRequests.append(enableHighAccuracy)
+        return try result.get()
     }
 }
 
@@ -664,6 +695,7 @@ struct HostLifecycleTests {
             try await testExistingDraftProtection(failures: &failures)
             try await testSignedOutFixture(failures: &failures)
             try await testPrintingBridgeFixture(failures: &failures)
+            try await testLocationBridgeFixture(failures: &failures)
             try await testNotificationBridgeFixture(failures: &failures)
             try await testResponseWatcherFixture(failures: &failures)
         } catch {
@@ -1206,6 +1238,107 @@ struct HostLifecycleTests {
     }
 
     @MainActor
+    private static func testLocationBridgeFixture(failures: inout [String]) async throws {
+        let fixtureHTML = try String(contentsOf: fixtureURL("location.html"), encoding: .utf8)
+        let expectedPosition = BrowserLocation(
+            latitude: 24.669,
+            longitude: -81.353,
+            accuracy: 12,
+            timestampMilliseconds: 1_722_700_000_000
+        )
+        let grantedProvider = RecordingLocationProvider(
+            permissionState: .granted,
+            result: .success(expectedPosition)
+        )
+        let granted = try await runLocationFixture(
+            fixtureHTML,
+            baseURL: URL(string: "https://www.chatgpt.com")!,
+            provider: grantedProvider
+        )
+        expect(granted.supported, "Provider page did not receive the Geolocation API", failures: &failures)
+        expect(granted.bridgeInstalled, "Provider page did not receive the Duet location bridge", failures: &failures)
+        expect(granted.permission == "granted", "Native location permission was not reported to the page", failures: &failures)
+        expect(granted.latitude == expectedPosition.latitude, "Location latitude changed in the page bridge", failures: &failures)
+        expect(granted.longitude == expectedPosition.longitude, "Location longitude changed in the page bridge", failures: &failures)
+        expect(granted.accuracy == expectedPosition.accuracy, "Location accuracy changed in the page bridge", failures: &failures)
+        expect(granted.errorCode == nil, "Granted location unexpectedly reported an error", failures: &failures)
+        expect(granted.failure == nil, "Location fixture failed: \(granted.failure ?? "")", failures: &failures)
+        expect(
+            grantedProvider.highAccuracyRequests == [true],
+            "Precise location requests must reach Core Location as high-accuracy requests",
+            failures: &failures
+        )
+
+        let deniedProvider = RecordingLocationProvider(
+            permissionState: .denied,
+            result: .failure(.permissionDenied)
+        )
+        let denied = try await runLocationFixture(
+            fixtureHTML,
+            baseURL: URL(string: "https://claude.ai")!,
+            provider: deniedProvider,
+            service: .claude
+        )
+        expect(denied.permission == "denied", "Denied native permission was not reported to Claude", failures: &failures)
+        expect(denied.errorCode == 1, "Denied location must use the browser permission-denied code", failures: &failures)
+
+        let foreignProvider = RecordingLocationProvider(
+            permissionState: .granted,
+            result: .success(expectedPosition)
+        )
+        let foreign = try await runLocationFixture(
+            fixtureHTML,
+            baseURL: URL(string: "https://example.com")!,
+            provider: foreignProvider
+        )
+        expect(!foreign.bridgeInstalled, "Non-provider origins must not receive the Duet location bridge", failures: &failures)
+        expect(foreignProvider.highAccuracyRequests.isEmpty, "Non-provider pages must not request native location", failures: &failures)
+        try await testDirectForeignLocationAttempt(provider: foreignProvider, failures: &failures)
+    }
+
+    @MainActor
+    private static func testDirectForeignLocationAttempt(
+        provider: RecordingLocationProvider,
+        failures: inout [String]
+    ) async throws {
+        let configuration = WKWebViewConfiguration()
+        let bridge = LocationBridge(service: .chatGPT, provider: provider)
+        bridge.install(in: configuration)
+        let webView = WKWebView(
+            frame: NSRect(x: 0, y: 0, width: 800, height: 600),
+            configuration: configuration
+        )
+        let loader = FixtureLoader()
+        defer {
+            webView.navigationDelegate = nil
+            webView.stopLoading()
+        }
+        try await loader.loadHTML(
+            "<html><body>Foreign</body></html>",
+            baseURL: URL(string: "https://example.com")!,
+            in: webView
+        )
+        let handlerWasVisible: Bool = try await evaluate(
+            """
+            (() => {
+              const handler = window.webkit?.messageHandlers?.duetLocation;
+              if (!handler) return false;
+              handler.postMessage({ type: 'currentPosition', enableHighAccuracy: true }).catch(() => {});
+              return true;
+            })()
+            """,
+            in: webView
+        )
+        try await Task.sleep(for: .milliseconds(100))
+        expect(handlerWasVisible, "The foreign location test must exercise the native handler", failures: &failures)
+        expect(
+            provider.highAccuracyRequests.isEmpty,
+            "A foreign origin must be rejected even when it calls the location handler directly",
+            failures: &failures
+        )
+    }
+
+    @MainActor
     private static func testDirectForeignBridgeAttempt(failures: inout [String]) async throws {
         let presenter = RecordingNotificationPresenter(initial: .granted, afterRequest: .granted)
         let configuration = WKWebViewConfiguration()
@@ -1324,6 +1457,36 @@ struct HostLifecycleTests {
             try await Task.sleep(for: .milliseconds(50))
         }
         return try await evaluate("(window.__duetNotificationTest)", in: webView)
+    }
+
+    @MainActor
+    private static func runLocationFixture(
+        _ fixtureHTML: String,
+        baseURL: URL,
+        provider: RecordingLocationProvider,
+        service: ChatService = .chatGPT
+    ) async throws -> LocationFixtureOutcome {
+        let configuration = WKWebViewConfiguration()
+        let bridge = LocationBridge(service: service, provider: provider)
+        bridge.install(in: configuration)
+        let webView = WKWebView(
+            frame: NSRect(x: 0, y: 0, width: 800, height: 600),
+            configuration: configuration
+        )
+        let loader = FixtureLoader()
+        defer {
+            webView.navigationDelegate = nil
+            webView.stopLoading()
+        }
+        try await loader.loadHTML(fixtureHTML, baseURL: baseURL, in: webView)
+
+        let deadline = Date().addingTimeInterval(5)
+        while Date() < deadline {
+            let finished: Bool = try await evaluate("Boolean(window.__duetLocationTest)", in: webView)
+            if finished { break }
+            try await Task.sleep(for: .milliseconds(50))
+        }
+        return try await evaluate("(window.__duetLocationTest)", in: webView)
     }
 
     @MainActor

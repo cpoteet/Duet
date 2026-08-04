@@ -41,6 +41,7 @@ xcrun swiftc \
   -framework WebKit \
   -framework AppKit \
   -framework Combine \
+  -framework CoreLocation \
   "$ROOT"/Sources/*.swift \
   -o "$EXECUTABLE"
 

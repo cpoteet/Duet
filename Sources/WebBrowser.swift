@@ -14,6 +14,7 @@ final class BrowserController: NSObject, ObservableObject {
         service: service,
         presenter: DuetNotificationManager.shared
     )
+    private lazy var locationBridge = LocationBridge(service: service)
     private lazy var printingBridge = PrintingBridge(service: service, presenter: self)
     private var hasRetriedBlankInitialClaudeLoad = false
     // WebKit ends a main-frame navigation with error 102 after converting it
@@ -38,6 +39,7 @@ final class BrowserController: NSObject, ObservableObject {
         configuration.websiteDataStore = .default()
         configuration.preferences.isElementFullscreenEnabled = true
         notificationBridge.install(in: configuration)
+        locationBridge.install(in: configuration)
         printingBridge.install(in: configuration)
 
         let newWebView = WKWebView(frame: .zero, configuration: configuration)

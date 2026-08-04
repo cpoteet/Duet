@@ -28,6 +28,8 @@
     <true/>
     <key>NSHumanReadableCopyright</key>
     <string>Personal local build</string>
+    <key>NSLocationUsageDescription</key>
+    <string>Duet needs location access when you choose to share your precise location with ChatGPT or Claude.</string>
     <key>NSMicrophoneUsageDescription</key>
     <string>Duet needs microphone access when you use dictation or audio chat in ChatGPT or Claude.</string>
 </dict>

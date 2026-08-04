@@ -30,12 +30,14 @@ xcrun swiftc \
   -framework WebKit \
   -framework AppKit \
   -framework Combine \
+  -framework CoreLocation \
   -framework UserNotifications \
   "$ROOT/Sources/Domain.swift" \
   "$ROOT/Sources/UpdateChecker.swift" \
   "$ROOT/Sources/ProviderAdapter.swift" \
   "$ROOT/Sources/NotificationScript.swift" \
   "$ROOT/Sources/NotificationBridge.swift" \
+  "$ROOT/Sources/LocationBridge.swift" \
   "$ROOT/Sources/PrintingBridge.swift" \
   "$ROOT/Sources/WebBrowser.swift" \
   "$ROOT/Sources/AppState.swift" \
@@ -50,6 +52,14 @@ MICROPHONE_USAGE_DESCRIPTION=$(
 )
 if [[ -z "$MICROPHONE_USAGE_DESCRIPTION" ]]; then
   echo "Missing NSMicrophoneUsageDescription in Resources/Info.plist" >&2
+  exit 1
+fi
+
+LOCATION_USAGE_DESCRIPTION=$(
+  plutil -extract NSLocationUsageDescription raw "$ROOT/Resources/Info.plist"
+)
+if [[ -z "$LOCATION_USAGE_DESCRIPTION" ]]; then
+  echo "Missing NSLocationUsageDescription in Resources/Info.plist" >&2
   exit 1
 fi
 

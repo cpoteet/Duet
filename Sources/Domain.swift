@@ -79,6 +79,12 @@ enum ChatService: String, CaseIterable, Identifiable, Hashable {
         return promptHosts.contains { hostMatches(host, domain: $0) }
     }
 
+    func allowsMediaCapture(originProtocol: String, host: String) -> Bool {
+        guard originProtocol.lowercased() == "https" else { return false }
+        let normalizedHost = host.lowercased()
+        return promptHosts.contains { hostMatches(normalizedHost, domain: $0) }
+    }
+
     func isAuthenticationPage(_ url: URL?) -> Bool {
         guard url?.scheme?.lowercased() == "https", let host = url?.host?.lowercased() else { return false }
         if (providerAuthenticationHosts + authenticationHosts).contains(where: { hostMatches(host, domain: $0) }) {

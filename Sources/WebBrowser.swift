@@ -317,6 +317,28 @@ final class BrowserController: NSObject, ObservableObject {
         !canShowMIMEType || isAttachmentContentDisposition(contentDisposition)
     }
 
+    static func mediaCapturePermissionDecision(
+        service: ChatService,
+        originProtocol: String,
+        originHost: String,
+        frameURL: URL?,
+        type: WKMediaCaptureType
+    ) -> WKPermissionDecision {
+        guard service.allowsMediaCapture(originProtocol: originProtocol, host: originHost),
+              service.allowsPromptInjection(at: frameURL) else {
+            return .deny
+        }
+
+        switch type {
+        case .microphone:
+            return .grant
+        case .camera, .cameraAndMicrophone:
+            return .prompt
+        @unknown default:
+            return .deny
+        }
+    }
+
     private static func isAttachmentContentDisposition(_ value: String?) -> Bool {
         guard let dispositionType = value?
             .split(separator: ";", maxSplits: 1, omittingEmptySubsequences: false)
@@ -641,6 +663,28 @@ extension BrowserController: WebPagePrintPresenting {
 }
 
 extension BrowserController: WKUIDelegate {
+    nonisolated func webView(
+        _ webView: WKWebView,
+        requestMediaCapturePermissionFor origin: WKSecurityOrigin,
+        initiatedByFrame frame: WKFrameInfo,
+        type: WKMediaCaptureType,
+        decisionHandler: @escaping @MainActor (WKPermissionDecision) -> Void
+    ) {
+        MainActor.assumeIsolated {
+            guard self.webView === webView else {
+                decisionHandler(.deny)
+                return
+            }
+            decisionHandler(Self.mediaCapturePermissionDecision(
+                service: self.service,
+                originProtocol: origin.protocol,
+                originHost: origin.host,
+                frameURL: frame.request.url,
+                type: type
+            ))
+        }
+    }
+
     nonisolated func webView(
         _ webView: WKWebView,
         runOpenPanelWith parameters: WKOpenPanelParameters,

@@ -449,6 +449,9 @@ struct HostLifecycleTests {
         let filePickerSelector = NSSelectorFromString(
             "webView:runOpenPanelWithParameters:initiatedByFrame:completionHandler:"
         )
+        let mediaCaptureSelector = NSSelectorFromString(
+            "webView:requestMediaCapturePermissionForOrigin:initiatedByFrame:type:decisionHandler:"
+        )
         let responsePolicySelector = NSSelectorFromString(
             "webView:decidePolicyForNavigationResponse:decisionHandler:"
         )
@@ -494,6 +497,50 @@ struct HostLifecycleTests {
         expect(
             browserController.responds(to: filePickerSelector),
             "Browser controller should handle WebKit file-upload panels"
+        )
+        expect(
+            browserController.responds(to: mediaCaptureSelector),
+            "Browser controller should persist trusted provider microphone access"
+        )
+        expect(
+            BrowserController.mediaCapturePermissionDecision(
+                service: .chatGPT,
+                originProtocol: "https",
+                originHost: "www.chatgpt.com",
+                frameURL: URL(string: "https://www.chatgpt.com/c/123"),
+                type: .microphone
+            ) == .grant,
+            "Trusted provider microphone requests should not prompt again"
+        )
+        expect(
+            BrowserController.mediaCapturePermissionDecision(
+                service: .chatGPT,
+                originProtocol: "https",
+                originHost: "www.chatgpt.com",
+                frameURL: URL(string: "https://www.chatgpt.com/c/123"),
+                type: .camera
+            ) == .prompt,
+            "Camera requests should preserve WebKit's user prompt"
+        )
+        expect(
+            BrowserController.mediaCapturePermissionDecision(
+                service: .chatGPT,
+                originProtocol: "https",
+                originHost: "example.com",
+                frameURL: URL(string: "https://www.chatgpt.com/c/123"),
+                type: .microphone
+            ) == .deny,
+            "Foreign origins must not receive microphone access"
+        )
+        expect(
+            BrowserController.mediaCapturePermissionDecision(
+                service: .chatGPT,
+                originProtocol: "https",
+                originHost: "www.chatgpt.com",
+                frameURL: URL(string: "https://accounts.google.com/signin"),
+                type: .microphone
+            ) == .deny,
+            "Authentication frames must not receive microphone access"
         )
         expect(
             browserController.responds(to: responsePolicySelector),

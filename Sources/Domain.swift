@@ -3,6 +3,55 @@ import Foundation
 enum AppPreferenceKey {
     static let keepProvidersLoaded = "keepProvidersLoaded"
     static let responseCompletionNotifications = "responseCompletionNotifications"
+    static let startupDestination = "startupDestination"
+    static let lastWorkspaceDestination = "lastWorkspaceDestination"
+}
+
+enum StartupDestination: String, CaseIterable, Identifiable {
+    case askEveryTime
+    case chatGPT
+    case claude
+    case both
+    case lastUsed
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .askEveryTime: "Ask Every Time"
+        case .chatGPT: "ChatGPT"
+        case .claude: "Claude"
+        case .both: "Both"
+        case .lastUsed: "Last Used"
+        }
+    }
+
+    static func stored(in userDefaults: UserDefaults) -> StartupDestination {
+        guard let rawValue = userDefaults.string(forKey: AppPreferenceKey.startupDestination) else {
+            return .askEveryTime
+        }
+        return StartupDestination(rawValue: rawValue) ?? .askEveryTime
+    }
+
+    func resolvedPromptTarget(lastWorkspaceDestinationRawValue: String?) -> PromptTarget? {
+        switch self {
+        case .askEveryTime:
+            nil
+        case .chatGPT:
+            .service(.chatGPT)
+        case .claude:
+            .service(.claude)
+        case .both:
+            .both
+        case .lastUsed:
+            switch lastWorkspaceDestinationRawValue.flatMap(StartupDestination.init(rawValue:)) {
+            case .chatGPT: .service(.chatGPT)
+            case .claude: .service(.claude)
+            case .both: .both
+            case .askEveryTime, .lastUsed, .none: nil
+            }
+        }
+    }
 }
 
 enum ChatService: String, CaseIterable, Identifiable, Hashable {
@@ -163,7 +212,7 @@ struct DispatchNotice: Identifiable, Equatable {
     let results: [PromptDispatchResult]
 }
 
-enum PromptTarget {
+enum PromptTarget: Equatable {
     case current
     case service(ChatService)
     case both

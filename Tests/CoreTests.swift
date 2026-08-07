@@ -14,6 +14,28 @@ struct CoreTests {
         expect(ChatService.chatGPT.newConversationURL.absoluteString == "https://www.chatgpt.com/", "ChatGPT new conversation URL changed")
         expect(ChatService.claude.newConversationURL.absoluteString == "https://claude.ai/new", "Claude new conversation URL changed")
         expect(ChatService.allCases.count == 2, "Expected exactly two services")
+        expect(StartupDestination.allCases.count == 5, "Expected five startup destination choices")
+        expect(StartupDestination.askEveryTime.title == "Ask Every Time", "Ask-every-time startup label changed")
+        expect(
+            StartupDestination.chatGPT.resolvedPromptTarget(lastWorkspaceDestinationRawValue: nil) == .service(.chatGPT),
+            "ChatGPT startup destination should open ChatGPT"
+        )
+        expect(
+            StartupDestination.claude.resolvedPromptTarget(lastWorkspaceDestinationRawValue: nil) == .service(.claude),
+            "Claude startup destination should open Claude"
+        )
+        expect(
+            StartupDestination.both.resolvedPromptTarget(lastWorkspaceDestinationRawValue: nil) == .both,
+            "Both startup destination should open split view"
+        )
+        expect(
+            StartupDestination.lastUsed.resolvedPromptTarget(lastWorkspaceDestinationRawValue: StartupDestination.claude.rawValue) == .service(.claude),
+            "Last Used should restore its saved provider"
+        )
+        expect(
+            StartupDestination.lastUsed.resolvedPromptTarget(lastWorkspaceDestinationRawValue: "invalid") == nil,
+            "An invalid Last Used destination should show the chooser"
+        )
         expect(ChatService.chatGPT.allowsNavigation(to: URL(string: "https://auth.openai.com/login")!), "ChatGPT auth host must be allowed")
         expect(ChatService.claude.allowsNavigation(to: URL(string: "https://accounts.google.com/signin")!), "Shared identity provider must be allowed")
         expect(!ChatService.chatGPT.allowsNavigation(to: URL(string: "http://chatgpt.com")!), "Non-HTTPS provider navigation must be rejected")

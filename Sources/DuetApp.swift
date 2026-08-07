@@ -1,8 +1,12 @@
+import Foundation
 import SwiftUI
 
 @main
 struct DuetApp: App {
-    @StateObject private var appState = AppState()
+    @StateObject private var appState = AppState(
+        startupDestination: StartupDestination.stored(in: .standard),
+        userDefaults: .standard
+    )
     @NSApplicationDelegateAdaptor(DuetApplicationDelegate.self) private var applicationDelegate
     @Environment(\.openWindow) private var openWindow
 

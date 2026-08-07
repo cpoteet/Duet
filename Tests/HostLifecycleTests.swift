@@ -619,6 +619,40 @@ struct HostLifecycleTests {
         )
         withExtendedLifetime(browserChangeObserver) {}
 
+        let startupDefaultsSuite = "Duet.HostLifecycleTests.\(UUID().uuidString)"
+        guard let startupDefaults = UserDefaults(suiteName: startupDefaultsSuite) else {
+            fputs("FAIL: Could not create isolated startup defaults\n", stderr)
+            exit(1)
+        }
+        startupDefaults.removePersistentDomain(forName: startupDefaultsSuite)
+        defer { startupDefaults.removePersistentDomain(forName: startupDefaultsSuite) }
+
+        let claudeStartupState = AppState(startupDestination: .claude, userDefaults: startupDefaults)
+        expect(!claudeStartupState.isLaunchChooserVisible, "Claude startup should skip the tool chooser")
+        expect(claudeStartupState.selectedService == .claude, "Claude startup should select Claude")
+        expect(!claudeStartupState.isSplitView, "Claude startup should use one pane")
+        expect(
+            claudeStartupState.browser(for: .claude).webView != nil
+                && claudeStartupState.browser(for: .chatGPT).webView == nil,
+            "Claude startup should prepare only Claude"
+        )
+
+        let bothStartupState = AppState(startupDestination: .both, userDefaults: startupDefaults)
+        expect(!bothStartupState.isLaunchChooserVisible, "Both startup should skip the tool chooser")
+        expect(bothStartupState.isSplitView, "Both startup should use split view")
+        expect(
+            ChatService.allCases.allSatisfy { bothStartupState.browser(for: $0).webView != nil },
+            "Both startup should prepare both providers"
+        )
+
+        startupDefaults.set(StartupDestination.claude.rawValue, forKey: AppPreferenceKey.lastWorkspaceDestination)
+        let lastUsedStartupState = AppState(startupDestination: .lastUsed, userDefaults: startupDefaults)
+        expect(!lastUsedStartupState.isLaunchChooserVisible, "Last Used should skip the chooser when a destination exists")
+        expect(lastUsedStartupState.selectedService == .claude, "Last Used should restore the saved provider")
+        startupDefaults.removeObject(forKey: AppPreferenceKey.lastWorkspaceDestination)
+        let emptyLastUsedStartupState = AppState(startupDestination: .lastUsed, userDefaults: startupDefaults)
+        expect(emptyLastUsedStartupState.isLaunchChooserVisible, "Last Used should show the chooser without a saved destination")
+
         let splitPreparationState = AppState()
         var providersWerePreparedBeforeSplitPublished = false
         let splitStateObserver = splitPreparationState.$isSplitView.dropFirst().sink { isSplitView in
@@ -635,12 +669,16 @@ struct HostLifecycleTests {
         )
         withExtendedLifetime(splitStateObserver) {}
 
-        let workspaceState = AppState()
+        let workspaceState = AppState(userDefaults: startupDefaults)
         expect(workspaceState.isLaunchChooserVisible, "Workspace should begin at the tool chooser")
         workspaceState.openWorkspace(for: .service(.claude))
         expect(!workspaceState.isLaunchChooserVisible, "A provider destination should leave the tool chooser")
         expect(workspaceState.selectedService == .claude, "Claude destination should select Claude")
         expect(!workspaceState.isSplitView, "A single-provider destination should use one pane")
+        expect(
+            startupDefaults.string(forKey: AppPreferenceKey.lastWorkspaceDestination) == StartupDestination.claude.rawValue,
+            "Opening Claude should remember it as the last workspace destination"
+        )
         let releasableClaudeView = workspaceState.browser(for: .claude).webView
         workspaceState.openWorkspace(for: .service(.chatGPT))
         try? await Task.sleep(for: .milliseconds(350))
@@ -659,6 +697,10 @@ struct HostLifecycleTests {
         )
         workspaceState.openWorkspace(for: .both)
         expect(workspaceState.isSplitView, "Both destination should use split view")
+        expect(
+            startupDefaults.string(forKey: AppPreferenceKey.lastWorkspaceDestination) == StartupDestination.both.rawValue,
+            "Opening Both should remember split view as the last workspace destination"
+        )
         workspaceState.browserDidMount(.chatGPT)
         workspaceState.browserDidMount(.claude)
         let splitWorkspaceMounted = await workspaceState.waitForQuickPromptWorkspaceMount(

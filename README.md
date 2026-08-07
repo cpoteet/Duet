@@ -11,6 +11,7 @@ Both the ChatGPT and Claude Mac apps are bloated Electron apps that are unnecess
 - **ChatGPT and Claude in one app.** Choose either provider at launch, then switch between them without opening a separate browser window.
 - **Side-by-side comparison.** Turn on Split to keep ChatGPT and Claude visible together; resize the divider or reset the panes to equal widths.
 - **Quick Prompt from anywhere.** Press **Control–Option–Space**, or choose **Tools → Quick Prompt**, to send a prompt to a new ChatGPT conversation, a new Claude conversation, or both.
+- **Your preferred startup view.** Keep the destination chooser, open directly to ChatGPT, Claude, or Both, or return to the workspace you used last.
 - **Shared prompt drawer.** Expand the native prompt bar to send plain-text prompts to the active provider or to both providers at once.
 - **Your familiar AI workspaces.** Conversations, chat history, attachments, and provider-specific tools stay inside the official websites.
 - **Native file transfers.** Upload attachments with the standard file picker and save provider-generated files with a macOS save dialog.
@@ -35,7 +36,7 @@ Reminder that you use this application at your own risk.
 
 ## Use Duet
 
-1. Launch Duet and choose **ChatGPT**, **Claude**, or **Both**.
+1. Launch Duet and choose **ChatGPT**, **Claude**, or **Both**. In Settings, you can instead choose a destination Duet should open automatically on future launches.
 2. Sign in directly in the embedded provider page. Complete any passkey, two-factor authentication, or verification steps there.
 3. When you first use provider dictation or audio chat, allow Duet to access the microphone in the macOS permission prompt.
 4. In single view, use the provider picker to switch services. Toggle **Split** any time to view both together.

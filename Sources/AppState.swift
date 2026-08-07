@@ -19,11 +19,33 @@ final class AppState: ObservableObject {
     private var hasCompletedUpdateCheck = false
     private var isCheckingForUpdate = false
     private let inactiveBrowserReleaseDelay: Duration
+    private let userDefaults: UserDefaults?
 
-    init(inactiveBrowserReleaseDelay: Duration = .milliseconds(300)) {
+    init(
+        inactiveBrowserReleaseDelay: Duration = .milliseconds(300),
+        startupDestination: StartupDestination = .askEveryTime,
+        userDefaults: UserDefaults? = nil
+    ) {
         self.inactiveBrowserReleaseDelay = inactiveBrowserReleaseDelay
+        self.userDefaults = userDefaults
         browsers = Dictionary(uniqueKeysWithValues: ChatService.allCases.map { ($0, BrowserController(service: $0)) })
-        _ = browser(for: selectedService).prepare()
+
+        let startupTarget = startupDestination.resolvedPromptTarget(
+            lastWorkspaceDestinationRawValue: userDefaults?.string(forKey: AppPreferenceKey.lastWorkspaceDestination)
+        )
+        switch startupTarget {
+        case .service(let service):
+            selectedService = service
+            isLaunchChooserVisible = false
+            _ = browser(for: service).prepare()
+        case .both:
+            isSplitView = true
+            isLaunchChooserVisible = false
+            ChatService.allCases.forEach { _ = browser(for: $0).prepare() }
+        case .current, .none:
+            _ = browser(for: selectedService).prepare()
+        }
+        recordCurrentWorkspaceDestination()
     }
 
     func browser(for service: ChatService) -> BrowserController {
@@ -38,6 +60,7 @@ final class AppState: ObservableObject {
         if !isSplitView, !keepsProvidersLoaded, previous != service {
             scheduleInactiveBrowserRelease()
         }
+        recordCurrentWorkspaceDestination()
     }
 
     /// Tracks visible browser mounting for quick-prompt dispatch readiness.
@@ -74,6 +97,7 @@ final class AppState: ObservableObject {
             mountedBrowserServices.removeAll()
             scheduleInactiveBrowserRelease()
         }
+        recordCurrentWorkspaceDestination()
     }
 
     /// Makes the workspace reflect an explicit prompt destination before dispatch begins.
@@ -88,6 +112,18 @@ final class AppState: ObservableObject {
             setSplitView(true)
         }
         isLaunchChooserVisible = false
+        recordCurrentWorkspaceDestination()
+    }
+
+    private func recordCurrentWorkspaceDestination() {
+        guard !isLaunchChooserVisible, let userDefaults else { return }
+        let destination: StartupDestination
+        if isSplitView {
+            destination = .both
+        } else {
+            destination = selectedService == .chatGPT ? .chatGPT : .claude
+        }
+        userDefaults.set(destination.rawValue, forKey: AppPreferenceKey.lastWorkspaceDestination)
     }
 
     /// Quick Prompt always starts new conversations. Recreate selected provider

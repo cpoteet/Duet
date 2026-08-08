@@ -389,6 +389,42 @@ struct HostLifecycleTests {
             "The workspace marker should register the exact workspace window for later restoration"
         )
 
+        let windowSizeDefaultsName = "com.siolon.duet.tests.window-size.\(UUID().uuidString)"
+        if let windowSizeDefaults = UserDefaults(suiteName: windowSizeDefaultsName) {
+            defer { windowSizeDefaults.removePersistentDomain(forName: windowSizeDefaultsName) }
+            identifiedWorkspaceWindow.setFrame(
+                NSRect(x: 0, y: 0, width: 760, height: 540),
+                display: false
+            )
+            DuetWindowSizePersistence.save(identifiedWorkspaceWindow, userDefaults: windowSizeDefaults)
+
+            let sizeRestoreWindow = NSWindow(
+                contentRect: .init(x: 0, y: 0, width: 400, height: 400),
+                styleMask: [.titled, .resizable],
+                backing: .buffered,
+                defer: false
+            )
+            DuetWindowSizePersistence.restore(
+                sizeRestoreWindow,
+                centerInVisibleScreen: true,
+                userDefaults: windowSizeDefaults
+            )
+            expect(
+                abs(sizeRestoreWindow.frame.width - 760) < 0.5
+                    && abs(sizeRestoreWindow.frame.height - 540) < 0.5,
+                "The workspace should restore its persisted window size"
+            )
+            if let visibleFrame = sizeRestoreWindow.screen?.visibleFrame ?? NSScreen.main?.visibleFrame {
+                expect(
+                    abs(sizeRestoreWindow.frame.midX - visibleFrame.midX) < 0.5
+                        && abs(sizeRestoreWindow.frame.midY - visibleFrame.midY) < 0.5,
+                    "The workspace should center its restored window on the visible screen"
+                )
+            }
+        } else {
+            failures.append("Window-size persistence test could not create isolated defaults")
+        }
+
         identifiedWorkspaceWindow.orderOut(nil)
         let existingVisibleWindow = NSWindow(
             contentRect: .init(x: 0, y: 0, width: 400, height: 400),

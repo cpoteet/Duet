@@ -35,6 +35,13 @@ final class DuetApplicationDelegate: NSObject, NSApplicationDelegate {
         quickPrompt?.revealWorkspace()
     }
 
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        if let workspaceWindow = DuetWindowRegistry.workspaceWindow {
+            DuetWindowSizePersistence.save(workspaceWindow)
+        }
+        return .terminateNow
+    }
+
     func applicationWillTerminate(_ notification: Notification) {
         hotKey?.invalidate()
     }

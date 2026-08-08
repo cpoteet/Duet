@@ -6,6 +6,44 @@ enum DuetWindowIdentifier {
 }
 
 @MainActor
+enum DuetWindowSizePersistence {
+    private static let widthKey = "workspaceWindowWidth"
+    private static let heightKey = "workspaceWindowHeight"
+
+    static func save(_ window: NSWindow, userDefaults: UserDefaults = .standard) {
+        let size = window.frame.size
+        guard size.width.isFinite, size.height.isFinite, size.width > 0, size.height > 0 else { return }
+        userDefaults.set(size.width, forKey: widthKey)
+        userDefaults.set(size.height, forKey: heightKey)
+    }
+
+    static func restore(
+        _ window: NSWindow,
+        centerInVisibleScreen: Bool,
+        userDefaults: UserDefaults = .standard
+    ) {
+        let width = CGFloat(userDefaults.double(forKey: widthKey))
+        let height = CGFloat(userDefaults.double(forKey: heightKey))
+
+        let visibleFrame = (window.screen ?? NSScreen.main)?.visibleFrame
+        var frame = window.frame
+        if width.isFinite, height.isFinite, width > 0, height > 0 {
+            frame.size = NSSize(
+                width: min(width, visibleFrame?.width ?? width),
+                height: min(height, visibleFrame?.height ?? height)
+            )
+        }
+        if centerInVisibleScreen, let visibleFrame {
+            frame.origin = NSPoint(
+                x: visibleFrame.midX - (frame.width / 2),
+                y: visibleFrame.midY - (frame.height / 2)
+            )
+        }
+        window.setFrame(frame, display: false)
+    }
+}
+
+@MainActor
 enum DuetWindowRegistry {
     static weak var workspaceWindow: NSWindow?
 
@@ -81,12 +119,18 @@ struct WorkspaceWindowSnapshot {
 
 @MainActor
 final class WorkspaceWindowMarkerView: NSView {
+    private static var hasCenteredWorkspaceThisLaunch = false
+
     private var registrationTask: Task<Void, Never>?
+    private weak var observedWindow: NSWindow?
+    private weak var restoredWindow: NSWindow?
 
     override func viewWillMove(toWindow newWindow: NSWindow?) {
         if let window, window !== newWindow {
             registrationTask?.cancel()
             registrationTask = nil
+            stopObservingWindowResize(window)
+            restoredWindow = nil
             DuetWindowRegistry.unregister(window)
         }
         super.viewWillMove(toWindow: newWindow)
@@ -100,7 +144,50 @@ final class WorkspaceWindowMarkerView: NSView {
 
     func registerWorkspaceWindow() {
         guard let window else { return }
+        restoreWindowSizeIfNeeded(window)
         DuetWindowRegistry.register(window)
+    }
+
+    private func restoreWindowSizeIfNeeded(_ window: NSWindow) {
+        guard restoredWindow !== window else { return }
+        restoredWindow = window
+        let shouldCenter = !Self.hasCenteredWorkspaceThisLaunch
+        DispatchQueue.main.async { [weak self, weak window] in
+            guard let self, let window, self.window === window else { return }
+            if shouldCenter {
+                Self.hasCenteredWorkspaceThisLaunch = true
+            }
+            DuetWindowSizePersistence.restore(
+                window,
+                centerInVisibleScreen: shouldCenter
+            )
+            self.observeWindowResize(window)
+        }
+    }
+
+    private func observeWindowResize(_ window: NSWindow) {
+        guard observedWindow !== window else { return }
+        observedWindow = window
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(windowDidResize(_:)),
+            name: NSWindow.didResizeNotification,
+            object: window
+        )
+    }
+
+    private func stopObservingWindowResize(_ window: NSWindow) {
+        NotificationCenter.default.removeObserver(
+            self,
+            name: NSWindow.didResizeNotification,
+            object: window
+        )
+        observedWindow = nil
+    }
+
+    @objc private func windowDidResize(_ notification: Notification) {
+        guard let window = notification.object as? NSWindow, window === self.window else { return }
+        DuetWindowSizePersistence.save(window)
     }
 
     private func scheduleRegistrationRefresh() {

@@ -23,16 +23,19 @@ Duet is a personal Apple Silicon macOS 15+ app for using ChatGPT and Claude in a
 
 - Load ChatGPT at `https://www.chatgpt.com` and Claude at `https://claude.ai` in persistent WebKit website-data stores so sessions normally survive relaunches.
 - Default to one active provider; split view is on demand. Release inactive web views in single-pane mode to reduce memory while retaining website session data, unless the user enables Keep both providers loaded for faster switching.
+- Let users start at the destination chooser, ChatGPT, Claude, Both, or their last-used workspace. Persist the workspace size between launches, center the first workspace on the visible display, and preserve later user movement.
 - Quick Prompt is available globally with Control–Option–Space and from Tools → Quick Prompt. It sends to ChatGPT, Claude, or Both, always starts a fresh conversation for each selected provider, and brings the workspace forward for continued interaction.
 - Keep the primary workspace in its `WindowGroup` so Quick Prompt can reopen it after the window closes. Identify the workspace with its stable `NSWindow.identifier`; do not locate it by title or fall back to unrelated windows.
 - The shared native prompt drawer is text-only, collapsed by default, stays open until explicitly closed, and provides Send to Current and Send to Both.
 - Sending fills each provider's composer, waits for its reactive send control, then invokes it. Show independent provider statuses and never auto-retry an ambiguous submission.
 - Keep response viewing, history, attachments, and provider-specific features in the provider pages. Do not scrape or merge provider responses.
 - Support provider-managed sign-in, passkeys, and 2FA. Open provider-created popup windows in the default browser rather than managing custom popup windows inside Duet. Never collect or store user credentials.
+- Grant microphone capture only to active HTTPS ChatGPT and Claude provider frames after macOS authorization. Preserve camera prompts, and deny authentication, third-party, foreign, stale, spoofed, and non-HTTPS contexts.
+- Route geolocation through the native Core Location bridge only for approved ChatGPT and Claude main-frame origins, with macOS permission handling and no location access for authentication, third-party, or foreign pages.
 - Provide independent website-data resets for ChatGPT and Claude.
 - Keep provider URLs, selectors, readiness checks, and injection logic behind provider-specific adapters so provider markup changes are isolated.
 - Preserve correct split-view web-view ownership: a dismantled single-pane host must not remove a `WKWebView` that was moved into a replacement split-pane host.
 
 ## Verification focus
 
-Maintain coverage for provider configuration, dispatch states, generated injection scripts, prompt escaping, local HTML fixtures, and split-pane host lifecycle. For behavior changes, manually validate provider login, session persistence, single/split transitions, prompt drawer behavior, Send to Current, Send to Both, and independent website-data resets when relevant. For Quick Prompt changes, also verify the global shortcut and Tools menu entry, fresh-conversation navigation for each destination, split-pane mounting before sending to Both, and bringing back a hidden or minimized workspace.
+Maintain coverage for provider configuration, dispatch states, generated injection scripts, prompt escaping, local HTML fixtures, split-pane host lifecycle, startup restoration, workspace sizing, and microphone and location origin gates. For behavior changes, manually validate provider login, session persistence, single/split transitions, prompt drawer behavior, Send to Current, Send to Both, startup destination, window restoration, native permissions, and independent website-data resets when relevant. For Quick Prompt changes, also verify the global shortcut and Tools menu entry, fresh-conversation navigation for each destination, split-pane mounting before sending to Both, and bringing back a hidden or minimized workspace.

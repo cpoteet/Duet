@@ -11,10 +11,11 @@ Both the ChatGPT and Claude Mac apps are bloated Electron apps that are unnecess
 - **ChatGPT and Claude in one app.** Choose either provider at launch, then switch between them without opening a separate browser window.
 - **Side-by-side comparison.** Turn on Split to keep ChatGPT and Claude visible together; resize the divider or reset the panes to equal widths.
 - **Quick Prompt from anywhere.** Press **Control–Option–Space**, or choose **Tools → Quick Prompt**, to send a prompt to a new ChatGPT conversation, a new Claude conversation, or both.
-- **Your preferred startup view.** Keep the destination chooser, open directly to ChatGPT, Claude, or Both, or return to the workspace you used last.
+- **Your preferred startup view.** Keep the destination chooser, open directly to ChatGPT, Claude, or Both, or return to the workspace you used last. Duet also remembers your workspace size between launches.
 - **Shared prompt drawer.** Expand the native prompt bar to send plain-text prompts to the active provider or to both providers at once.
 - **Your familiar AI workspaces.** Conversations, chat history, attachments, and provider-specific tools stay inside the official websites.
 - **Native file transfers.** Upload attachments with the standard file picker and save provider-generated files with a macOS save dialog.
+- **Native permission handling.** Use provider microphone and precise-location features through scoped macOS permission prompts for trusted ChatGPT and Claude pages.
 - **Lightweight update notices.** Once per launch, Duet checks the latest public GitHub Release and shows a dismissible banner when a newer version is available. It never downloads or installs updates automatically.
 - **Persistent sign-in sessions.** Duet uses persistent WebKit website data so your sessions normally remain available after relaunching.
 - **Configurable switching performance.** Keep Duet's lower-memory default, or enable **Keep both providers loaded** in Settings for faster switching.
@@ -39,11 +40,12 @@ Reminder that you use this application at your own risk.
 1. Launch Duet and choose **ChatGPT**, **Claude**, or **Both**. In Settings, you can instead choose a destination Duet should open automatically on future launches.
 2. Sign in directly in the embedded provider page. Complete any passkey, two-factor authentication, or verification steps there.
 3. When you first use provider dictation or audio chat, allow Duet to access the microphone in the macOS permission prompt.
-4. In single view, use the provider picker to switch services. Toggle **Split** any time to view both together.
-5. For faster switching at the cost of additional memory, open **Duet → Settings** and enable **Keep both providers loaded**.
-6. Expand the **Prompt** drawer when you want to enter a text-only prompt. Send it to the active provider or choose **Send to Both** to submit the same prompt to ChatGPT and Claude.
-7. From any app, press **Control–Option–Space** to open **Quick Prompt**. Choose **ChatGPT**, **Claude**, or **Both**; Duet brings its workspace forward and starts a fresh conversation with each selected provider. You can also open Quick Prompt from **Tools → Quick Prompt** while Duet is active.
-8. Read and continue each conversation inside its provider pane. Duet does not merge or scrape provider responses.
+4. When a provider feature requests your precise location, choose whether to allow Duet's macOS location request. Duet shares it only with trusted ChatGPT and Claude pages that request it.
+5. In single view, use the provider picker to switch services. Toggle **Split** any time to view both together.
+6. For faster switching at the cost of additional memory, open **Duet → Settings** and enable **Keep both providers loaded**.
+7. Expand the **Prompt** drawer when you want to enter a text-only prompt. Send it to the active provider or choose **Send to Both** to submit the same prompt to ChatGPT and Claude.
+8. From any app, press **Control–Option–Space** to open **Quick Prompt**. Choose **ChatGPT**, **Claude**, or **Both**; Duet brings its workspace forward and starts a fresh conversation with each selected provider. You can also open Quick Prompt from **Tools → Quick Prompt** while Duet is active.
+9. Read and continue each conversation inside its provider pane. Duet does not merge or scrape provider responses.
 
 ## License
 

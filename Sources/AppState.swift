@@ -156,6 +156,19 @@ final class AppState: ObservableObject {
         return expected.isSubset(of: mountedBrowserServices)
     }
 
+    /// Sending the shared drawer to Both must happen from mounted split panes.
+    /// Switching to split view also clears any stale single-pane mount state.
+    func preparePromptDrawerWorkspace(
+        for target: PromptTarget,
+        timeout: TimeInterval = 2.5
+    ) async -> Bool {
+        guard case .both = target else { return true }
+        if !isSplitView {
+            openWorkspace(for: .both)
+        }
+        return await waitForQuickPromptWorkspaceMount(for: .both, timeout: timeout)
+    }
+
     @discardableResult
     func send(to target: PromptTarget) async -> [PromptDispatchResult] {
         let results = await send(prompt: prompt, to: target)

@@ -757,6 +757,41 @@ struct HostLifecycleTests {
             workspaceState.browser(for: .chatGPT).webView == nil,
             "Turning faster switching off should release the inactive provider after the UI transition"
         )
+
+        let promptDrawerState = AppState()
+        promptDrawerState.openWorkspace(for: .service(.chatGPT))
+        promptDrawerState.browserDidMount(.chatGPT)
+        var promptDrawerPreparationCompleted = false
+        let promptDrawerPreparation = Task {
+            let prepared = await promptDrawerState.preparePromptDrawerWorkspace(
+                for: .both,
+                timeout: 0.5
+            )
+            promptDrawerPreparationCompleted = true
+            return prepared
+        }
+        for _ in 0..<20 {
+            if promptDrawerState.isSplitView { break }
+            await Task.yield()
+        }
+        expect(promptDrawerState.isSplitView, "Sending the prompt drawer to Both should open split view")
+        expect(
+            ChatService.allCases.allSatisfy { promptDrawerState.browser(for: $0).webView != nil },
+            "Prompt drawer Both should prepare both provider views"
+        )
+        promptDrawerState.browserDidMount(.claude)
+        try? await Task.sleep(for: .milliseconds(75))
+        expect(
+            !promptDrawerPreparationCompleted,
+            "A stale single-pane mount must not satisfy prompt drawer split readiness"
+        )
+        promptDrawerState.browserDidMount(.chatGPT)
+        let promptDrawerPrepared = await promptDrawerPreparation.value
+        expect(
+            promptDrawerPrepared,
+            "Prompt drawer Both should wait for both split-pane browser hosts"
+        )
+
         workspaceState.openQuickPromptWorkspace(for: .both)
         expect(workspaceState.isSplitView, "Quick Prompt Both destination should use a fresh split workspace")
         workspaceState.browserDidMount(.chatGPT)

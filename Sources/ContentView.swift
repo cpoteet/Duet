@@ -4,6 +4,7 @@ import SwiftUI
 struct ContentView: View {
     @ObservedObject var appState: AppState
     @State private var isComposerOpen = false
+    @State private var isPreparingPromptDispatch = false
     @AppStorage("splitViewRatio") private var splitViewRatio = 0.5
     @AppStorage(AppPreferenceKey.keepProvidersLoaded) private var keepProvidersLoaded = false
     @State private var isSplitDividerHovering = false
@@ -491,7 +492,13 @@ struct ContentView: View {
 
     private func sendAndCollapse(to target: PromptTarget) {
         guard canSend(to: target) else { return }
+        isPreparingPromptDispatch = true
         Task {
+            defer { isPreparingPromptDispatch = false }
+            guard await appState.preparePromptDrawerWorkspace(for: target) else {
+                appState.reportQuickPromptWorkspaceUnavailable(for: target)
+                return
+            }
             let results = await appState.send(to: target)
             if !results.isEmpty && results.allSatisfy(\.wasSent) {
                 isComposerOpen = false
@@ -500,7 +507,7 @@ struct ContentView: View {
     }
 
     private func canSend(to target: PromptTarget) -> Bool {
-        hasPromptText && appState.canSend(to: target)
+        hasPromptText && !isPreparingPromptDispatch && appState.canSend(to: target)
     }
 
     private var hasPromptText: Bool {

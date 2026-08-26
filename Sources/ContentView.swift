@@ -220,6 +220,7 @@ struct ContentView: View {
                                 .shadow(color: .black.opacity(colorScheme == .dark ? 0 : 0.07), radius: 4, y: 1)
                         }
                     }
+                    .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("Show \(service.title)")

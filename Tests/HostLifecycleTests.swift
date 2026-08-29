@@ -854,6 +854,7 @@ struct HostLifecycleTests {
             try await testRepeatedPromptConfirmation(failures: &failures)
             try await testExistingDraftProtection(failures: &failures)
             try await testSignedOutFixture(failures: &failures)
+            try await testClaudeFileDropCompatibility(failures: &failures)
             try await testPrintingBridgeFixture(failures: &failures)
             try await testLocationBridgeFixture(failures: &failures)
             try await testNotificationBridgeFixture(failures: &failures)
@@ -1250,6 +1251,97 @@ struct HostLifecycleTests {
         try await discussionLoader.load(fixtureURL("login-discussion.html"), in: discussionWebView)
         let discussionRequiresLogin: Bool = try await evaluate(adapter.loginRequiredScript(), in: discussionWebView)
         expect(!discussionRequiresLogin, "Conversation text should not be mistaken for a sign-in screen", failures: &failures)
+    }
+
+    @MainActor
+    private static func testClaudeFileDropCompatibility(failures: inout [String]) async throws {
+        let configuration = WKWebViewConfiguration()
+        guard let source = ProviderAdapter.adapter(for: .claude).fileDropCompatibilityScript() else {
+            failures.append("Claude file-drop compatibility script was not configured")
+            return
+        }
+        configuration.userContentController.addUserScript(WKUserScript(
+            source: source,
+            injectionTime: .atDocumentStart,
+            forMainFrameOnly: true
+        ))
+        let webView = WKWebView(
+            frame: NSRect(x: 0, y: 0, width: 800, height: 600),
+            configuration: configuration
+        )
+        let loader = FixtureLoader()
+        defer {
+            webView.navigationDelegate = nil
+            webView.stopLoading()
+        }
+        let fixtureHTML = """
+        <html><body>
+          <input type="file" data-testid="file-upload" multiple>
+          <script>
+            window.__duetFileChangeCount = 0;
+            window.__duetDropOverlayVisible = true;
+            document.querySelector('[data-testid="file-upload"]').addEventListener('change', () => {
+              window.__duetFileChangeCount += 1;
+            });
+            document.body.addEventListener('dragleave', event => {
+              if (event.dataTransfer?.types.includes('Files') && event.relatedTarget === null) {
+                window.__duetDropOverlayVisible = false;
+              }
+            });
+          </script>
+        </body></html>
+        """
+        try await loader.loadHTML(
+            fixtureHTML,
+            baseURL: URL(string: "https://claude.ai")!,
+            in: webView
+        )
+
+        let handled: Bool = try await evaluate(
+            """
+            (() => {
+              const transfer = new DataTransfer();
+              transfer.items.add(new File(['Duet'], 'duet-drop.txt', { type: 'text/plain' }));
+              const event = new Event('drop', { bubbles: true, cancelable: true });
+              Object.defineProperty(event, 'dataTransfer', { value: transfer });
+              document.body.dispatchEvent(event);
+              const input = document.querySelector('[data-testid="file-upload"]');
+              return event.defaultPrevented &&
+                input.files?.length === 1 &&
+                input.files[0].name === 'duet-drop.txt' &&
+                window.__duetFileChangeCount === 1 &&
+                window.__duetDropOverlayVisible === false;
+            })()
+            """,
+            in: webView
+        )
+        expect(handled, "A Claude file drop should reach its working upload input", failures: &failures)
+
+        try await loader.loadHTML(
+            fixtureHTML,
+            baseURL: URL(string: "https://example.com")!,
+            in: webView
+        )
+        let foreignPageWasUntouched: Bool = try await evaluate(
+            """
+            (() => {
+              const transfer = new DataTransfer();
+              transfer.items.add(new File(['Duet'], 'foreign.txt', { type: 'text/plain' }));
+              const event = new Event('drop', { bubbles: true, cancelable: true });
+              Object.defineProperty(event, 'dataTransfer', { value: transfer });
+              document.body.dispatchEvent(event);
+              const input = document.querySelector('[data-testid="file-upload"]');
+              return !event.defaultPrevented && input.files.length === 0 &&
+                window.__duetFileChangeCount === 0;
+            })()
+            """,
+            in: webView
+        )
+        expect(
+            foreignPageWasUntouched,
+            "Claude file-drop compatibility must not run on foreign pages",
+            failures: &failures
+        )
     }
 
     @MainActor

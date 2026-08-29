@@ -6,6 +6,9 @@ struct ProviderAdapter {
     let userMessageSelectors: [String]
     /// Elements present only while the provider is generating a response.
     let generationIndicatorSelectors: [String]
+    /// A provider-owned file input used to bridge WebKit file drops through
+    /// the same upload path as the provider's working file picker.
+    let fileDropInputSelector: String?
 
     static func adapter(for service: ChatService) -> ProviderAdapter {
         switch service {
@@ -31,7 +34,8 @@ struct ProviderAdapter {
                     "button[data-testid='stop-button']",
                     "button[aria-label='Stop streaming']",
                     "button[aria-label='Stop generating']"
-                ]
+                ],
+                fileDropInputSelector: nil
             )
         case .claude:
             ProviderAdapter(
@@ -54,9 +58,67 @@ struct ProviderAdapter {
                 generationIndicatorSelectors: [
                     "[data-is-streaming='true']",
                     "button[aria-label='Stop response']"
-                ]
+                ],
+                fileDropInputSelector: "input[type='file'][data-testid='file-upload']"
             )
         }
+    }
+
+    /// Claude's drop handler reads `DataTransferItem.webkitGetAsEntry()`,
+    /// which can return no entries for Finder drops in an embedded WKWebView.
+    /// Its file picker reads the standard input `files` list and works. Route
+    /// user-initiated file drops through that same provider-owned input.
+    func fileDropCompatibilityScript() -> String? {
+        guard let fileDropInputSelector else { return nil }
+        let encodedSelector = jsonString(fileDropInputSelector)
+        return """
+        (() => {
+          const hostname = location.hostname.toLowerCase();
+          const isTrustedClaudePage = location.protocol === 'https:' &&
+            (hostname === 'claude.ai' || hostname.endsWith('.claude.ai'));
+          if (!isTrustedClaudePage || window.__duetFileDropCompatibilityInstalled) return;
+          window.__duetFileDropCompatibilityInstalled = true;
+
+          const findUploadInput = () => {
+            const input = document.querySelector(\(encodedSelector));
+            return input instanceof HTMLInputElement && !input.disabled ? input : null;
+          };
+          const containsFiles = event =>
+            Array.from(event.dataTransfer?.types || []).includes('Files');
+          const clearProviderDropOverlay = dataTransfer => {
+            if (!document.body) return;
+            const dragLeave = new Event('dragleave', { bubbles: true, cancelable: true });
+            Object.defineProperty(dragLeave, 'dataTransfer', { value: dataTransfer });
+            Object.defineProperty(dragLeave, 'relatedTarget', { value: null });
+            document.body.dispatchEvent(dragLeave);
+          };
+
+          window.addEventListener('dragover', event => {
+            if (!containsFiles(event) || !findUploadInput()) return;
+            event.preventDefault();
+            event.dataTransfer.dropEffect = 'copy';
+          }, true);
+
+          window.addEventListener('drop', event => {
+            const files = event.dataTransfer?.files;
+            if (!files || files.length === 0) return;
+            const input = findUploadInput();
+            if (!input) return;
+
+            try {
+              input.files = files;
+            } catch (_) {
+              return;
+            }
+
+            event.preventDefault();
+            event.stopImmediatePropagation();
+            input.dispatchEvent(new Event('input', { bubbles: true, composed: true }));
+            input.dispatchEvent(new Event('change', { bubbles: true, composed: true }));
+            clearProviderDropOverlay(event.dataTransfer);
+          }, true);
+        })();
+        """
     }
 
     func readinessScript() -> String {

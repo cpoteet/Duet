@@ -79,6 +79,7 @@ struct CoreTests {
             let submit = adapter.submissionScript()
             let baseline = adapter.submissionBaselineScript()
             let confirmation = adapter.submissionConfirmationScript(prompt: "test", baselineMessageCount: 0)
+            let fileDropCompatibility = adapter.fileDropCompatibilityScript()
             expect(readiness.contains("document.querySelector"), "\(service.title) readiness script has no selector")
             expect(readiness.contains("getClientRects"), "\(service.title) readiness script accepts a hidden composer")
             expect(fill.contains("InputEvent"), "\(service.title) fill script does not notify the page")
@@ -88,6 +89,18 @@ struct CoreTests {
             expect(baseline.contains("userMessageSelectors"), "\(service.title) submission baseline has no provider evidence")
             expect(confirmation.contains("userMessageSelectors"), "\(service.title) confirmation script has no provider evidence")
             expect(fill.contains("A quote:"), "\(service.title) prompt was not encoded")
+            if service == .claude {
+                expect(
+                    fileDropCompatibility?.contains("data-testid='file-upload'") == true,
+                    "Claude file drops must use its provider-owned upload input"
+                )
+                expect(
+                    fileDropCompatibility?.contains("hostname === 'claude.ai'") == true,
+                    "Claude file-drop compatibility must be origin-gated"
+                )
+            } else {
+                expect(fileDropCompatibility == nil, "ChatGPT must keep its native file-drop behavior")
+            }
         }
 
         for service in ChatService.allCases {

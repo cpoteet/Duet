@@ -41,6 +41,13 @@ final class BrowserController: NSObject, ObservableObject {
         notificationBridge.install(in: configuration)
         locationBridge.install(in: configuration)
         printingBridge.install(in: configuration)
+        if let fileDropScript = adapter.fileDropCompatibilityScript() {
+            configuration.userContentController.addUserScript(WKUserScript(
+                source: fileDropScript,
+                injectionTime: .atDocumentStart,
+                forMainFrameOnly: true
+            ))
+        }
 
         let newWebView = WKWebView(frame: .zero, configuration: configuration)
         newWebView.allowsBackForwardNavigationGestures = true

@@ -113,14 +113,15 @@ final class BrowserController: NSObject, ObservableObject {
     func dispatch(
         prompt: String,
         startsNewConversation: Bool = false,
-        timeout: TimeInterval = 12
+        timeout: TimeInterval? = nil
     ) async -> PromptDispatchOutcome {
+        let readinessTimeout = timeout ?? (startsNewConversation ? 60 : phase.promptReadinessTimeout)
         if startsNewConversation {
             openNewConversation()
         } else {
             _ = acquire()
         }
-        switch await waitForComposer(timeout: timeout) {
+        switch await waitForComposer(timeout: readinessTimeout) {
         case .ready:
             break
         case .loginRequired:
@@ -188,6 +189,8 @@ final class BrowserController: NSObject, ObservableObject {
         var nextLoginCheck = Date.distantPast
         while Date() < deadline {
             if Task.isCancelled { return .unavailable }
+            if case .failed = phase { return .unavailable }
+            if phase == .verificationRequired { return .unavailable }
             if await hasComposer() { return .ready }
             if Date() >= nextLoginCheck {
                 if await isLoginRequired() { return .loginRequired }

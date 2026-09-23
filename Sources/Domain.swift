@@ -163,6 +163,10 @@ enum BrowserPhase: Equatable {
     case ready
     case verificationRequired
     case failed(String)
+
+    var promptReadinessTimeout: TimeInterval {
+        self == .ready ? 12 : 60
+    }
 }
 
 enum PromptDispatchOutcome: Equatable {

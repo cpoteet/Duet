@@ -34,6 +34,7 @@ struct ContentView: View {
         }
         .frame(minWidth: 900, minHeight: 650)
         .background { WorkspaceWindowMarker() }
+        .toolbar(removing: .title)
         .toolbarBackground(.thinMaterial, for: .windowToolbar)
         .toolbar {
             if !appState.isLaunchChooserVisible {
@@ -330,6 +331,9 @@ struct ContentView: View {
                     Label("Close", systemImage: "xmark")
                         .font(.system(size: 13, weight: .semibold))
                         .foregroundStyle(palette.secondaryText)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 6)
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 .help("Close shared prompt")

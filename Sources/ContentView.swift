@@ -7,13 +7,11 @@ struct ContentView: View {
     @State private var isPreparingPromptDispatch = false
     @AppStorage("splitViewRatio") private var splitViewRatio = 0.5
     @AppStorage(AppPreferenceKey.keepProvidersLoaded) private var keepProvidersLoaded = false
-    @State private var isSplitDividerHovering = false
-    @State private var splitRatioAtDragStart: CGFloat?
+    @State private var splitViewResetID = 0
     @State private var toast: DispatchToast?
     @State private var toastDismissal: Task<Void, Never>?
     @Environment(\.colorScheme) private var colorScheme
 
-    private let splitDividerWidth: CGFloat = 9
     private let minimumPaneWidth: CGFloat = 280
 
     private var palette: AppPalette { AppPalette(scheme: colorScheme) }
@@ -27,16 +25,36 @@ struct ContentView: View {
 
             if appState.isLaunchChooserVisible {
                 launchChooser
-                launchPromptDrawer
             } else {
-                controlBar
                 browserAreaWithToast
-                promptDrawer
+                if isComposerOpen {
+                    promptDrawer
+                }
             }
         }
         .frame(minWidth: 900, minHeight: 650)
-        .background(palette.canvas)
         .background { WorkspaceWindowMarker() }
+        .toolbarBackground(.thinMaterial, for: .windowToolbar)
+        .toolbar {
+            if !appState.isLaunchChooserVisible {
+                ToolbarItem(placement: .principal) {
+                    workspacePicker
+                }
+                ToolbarItemGroup(placement: .primaryAction) {
+                    Button {
+                        isComposerOpen.toggle()
+                    } label: {
+                        Label("Prompt", systemImage: "paperplane")
+                            .padding(.horizontal, 6)
+                    }
+                    .labelStyle(.titleAndIcon)
+                    .keyboardShortcut("p", modifiers: [.command, .shift])
+                    .help(isComposerOpen ? "Close shared prompt" : "Open shared prompt")
+
+                    layoutMenu
+                }
+            }
+        }
         .animation(.easeOut(duration: 0.2), value: appState.isSplitView)
         .animation(.easeOut(duration: 0.2), value: appState.updateAvailable)
         .task {
@@ -94,7 +112,7 @@ struct ContentView: View {
             .help("Dismiss this version")
             .accessibilityLabel("Dismiss Duet \(update.version) update")
         }
-        .background(palette.accent.opacity(colorScheme == .dark ? 0.16 : 0.09))
+        .background(.thinMaterial)
         .overlay(alignment: .bottom) { hairline }
     }
 
@@ -117,6 +135,7 @@ struct ContentView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding(.horizontal, 28)
+        .background(.thinMaterial)
     }
 
     private func launchChoice(_ destination: LaunchDestination) -> some View {
@@ -163,111 +182,93 @@ struct ContentView: View {
         appState.openWorkspace(for: destination.promptTarget)
     }
 
-    private var launchPromptDrawer: some View {
-        Color.clear
-        .frame(maxWidth: .infinity)
-        .frame(height: 43)
-        .background(palette.drawer)
-        .overlay(alignment: .top) { hairline }
-        .accessibilityHidden(true)
-    }
-
-    @ViewBuilder
-    private var controlBar: some View {
-        if appState.isSplitView {
-            HStack(spacing: 12) {
-                Spacer()
-                splitToggle
-                resetSplitViewButton
+    private var workspacePicker: some View {
+        Picker("Workspace", selection: Binding(
+            get: {
+                appState.isSplitView ? LaunchDestination.both :
+                    (appState.selectedService == .chatGPT ? .chatGPT : .claude)
+            },
+            set: { appState.openWorkspace(for: $0.promptTarget) }
+        )) {
+            Label {
+                Text("ChatGPT")
+                    .padding(.trailing, 7)
+            } icon: {
+                ProviderMark(service: .chatGPT, size: 16)
+                    .accessibilityHidden(true)
+                    .padding(.trailing, 9)
             }
-            .padding(.horizontal, 20)
-            .frame(height: 54)
-            .background(palette.controlBar)
-            .overlay(alignment: .bottom) { hairline }
-        } else {
-            HStack(spacing: 16) {
-                providerPicker
-                Spacer(minLength: 20)
-                splitToggle
+            .tag(LaunchDestination.chatGPT)
+            Label {
+                Text("Claude")
+            } icon: {
+                ProviderMark(service: .claude, size: 16)
+                    .accessibilityHidden(true)
+                    .padding(.trailing, 9)
             }
-            .padding(.horizontal, 16)
-            .frame(height: 54)
-            .background(palette.controlBar)
-            .overlay(alignment: .bottom) { hairline }
-        }
-    }
-
-    private var providerPicker: some View {
-        HStack(spacing: 1) {
-            ForEach(ChatService.allCases) { service in
-                Button {
-                    appState.select(service)
-                } label: {
-                    HStack(spacing: 5) {
-                        Circle()
-                            .fill(providerColor(for: service))
-                            .frame(width: 7, height: 7)
-                        Text(service.title)
-                    }
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(appState.selectedService == service ? palette.primaryText : palette.secondaryText)
-                    .padding(.horizontal, 8)
-                    .frame(height: 28)
-                    .background {
-                        if appState.selectedService == service {
-                            RoundedRectangle(cornerRadius: 7, style: .continuous)
-                                .fill(palette.selectedControl)
-                                .shadow(color: .black.opacity(colorScheme == .dark ? 0 : 0.07), radius: 4, y: 1)
-                        }
-                    }
-                    .contentShape(Rectangle())
+            .tag(LaunchDestination.claude)
+            Label {
+                Text("Both")
+            } icon: {
+                HStack(spacing: 2) {
+                    ProviderMark(service: .chatGPT, size: 14)
+                    ProviderMark(service: .claude, size: 14)
                 }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Show \(service.title)")
-                .accessibilityAddTraits(appState.selectedService == service ? .isSelected : [])
+                .accessibilityHidden(true)
+                .padding(.trailing, 9)
             }
+            .tag(LaunchDestination.both)
+            .accessibilityLabel("Both")
         }
-        .padding(2)
-        .background(palette.controlWell, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .labelsHidden()
+        .labelStyle(.titleAndIcon)
+        .pickerStyle(.menu)
+        .disabled(appState.hasActiveOperations)
+        .help("Choose which providers to show")
     }
 
-    private var splitToggle: some View {
-        Toggle("Split", isOn: Binding(
-            get: { appState.isSplitView },
-            set: { appState.setSplitView($0) }
-        ))
-        .toggleStyle(.switch)
-        .font(.system(size: 14, weight: .medium))
-        .foregroundStyle(palette.secondaryText)
-        .tint(palette.accent)
-        .accessibilityHint("Shows ChatGPT and Claude side by side")
-    }
-
-    private var resetSplitViewButton: some View {
-        Button {
-            splitViewRatio = 0.5
+    private var layoutMenu: some View {
+        Menu {
+            Button("Single Pane") { appState.setSplitView(false) }
+                .disabled(!appState.isSplitView)
+            Button("Split View") { appState.setSplitView(true) }
+                .disabled(appState.isSplitView)
+            Divider()
+            Button("Equal Widths") {
+                splitViewRatio = 0.5
+                splitViewResetID += 1
+            }
+            .disabled(!appState.isSplitView)
         } label: {
-            Label("Reset View", systemImage: "arrow.counterclockwise")
+            Label("Layout", systemImage: "rectangle.split.2x1")
         }
-        .buttonStyle(.bordered)
-        .controlSize(.small)
-        .help("Reset split panes to equal widths")
-        .accessibilityHint("Restores ChatGPT and Claude to equal widths")
+        .disabled(appState.hasActiveOperations)
+        .help("Change the workspace layout")
     }
 
     @ViewBuilder
     private var browserArea: some View {
         if appState.isSplitView {
             GeometryReader { proxy in
-                let paneWidth = splitPaneWidth(in: proxy.size.width)
-
-                HStack(spacing: 0) {
+                HSplitView {
                     servicePane(.chatGPT)
-                        .frame(width: paneWidth)
-                    splitViewDivider(totalWidth: proxy.size.width)
+                        .frame(minWidth: minimumPaneWidth)
+                        .background {
+                            NativeSplitRatioRestorer(
+                                ratio: splitViewRatio,
+                                minimumPaneWidth: minimumPaneWidth
+                            )
+                        }
+                        .onGeometryChange(for: CGFloat.self) { pane in
+                            pane.size.width
+                        } action: { _, width in
+                            guard width > 0, proxy.size.width > 0 else { return }
+                            splitViewRatio = Double(width / proxy.size.width)
+                        }
                     servicePane(.claude)
-                        .frame(maxWidth: .infinity)
+                        .frame(minWidth: minimumPaneWidth)
                 }
+                .id(splitViewResetID)
             }
         } else if keepProvidersLoaded {
             ZStack {
@@ -301,103 +302,8 @@ struct ContentView: View {
         .animation(.easeOut(duration: 0.2), value: toast)
     }
 
-    private func splitPaneWidth(in totalWidth: CGFloat) -> CGFloat {
-        let availableWidth = max(0, totalWidth - splitDividerWidth)
-        return availableWidth * clampedSplitRatio(for: totalWidth)
-    }
-
-    private func clampedSplitRatio(for totalWidth: CGFloat) -> CGFloat {
-        let availableWidth = max(1, totalWidth - splitDividerWidth)
-        let minimumRatio = min(0.5, minimumPaneWidth / availableWidth)
-        let maximumRatio = max(0.5, 1 - minimumRatio)
-        return min(max(CGFloat(splitViewRatio), minimumRatio), maximumRatio)
-    }
-
-    private func setSplitRatio(_ ratio: CGFloat, in totalWidth: CGFloat) {
-        let availableWidth = max(1, totalWidth - splitDividerWidth)
-        let minimumRatio = min(0.5, minimumPaneWidth / availableWidth)
-        let maximumRatio = max(0.5, 1 - minimumRatio)
-        splitViewRatio = Double(min(max(ratio, minimumRatio), maximumRatio))
-    }
-
-    private func splitViewDivider(totalWidth: CGFloat) -> some View {
-        Rectangle()
-            .fill(palette.border)
-            .frame(width: 1)
-            .frame(width: splitDividerWidth)
-            .frame(maxHeight: .infinity)
-            .contentShape(Rectangle())
-            .overlay {
-                if isSplitDividerHovering || splitRatioAtDragStart != nil {
-                    RoundedRectangle(cornerRadius: 3, style: .continuous)
-                        .fill(palette.controlWell)
-                        .frame(width: 5, height: 54)
-                        .overlay {
-                            RoundedRectangle(cornerRadius: 3, style: .continuous)
-                                .stroke(palette.accent.opacity(0.8), lineWidth: 1)
-                        }
-                        .overlay {
-                            VStack(spacing: 3) {
-                                ForEach(0..<3, id: \.self) { _ in
-                                    Circle()
-                                        .fill(palette.accent)
-                                        .frame(width: 2, height: 2)
-                                }
-                            }
-                        }
-                        .transition(.opacity)
-                }
-            }
-            .animation(.easeOut(duration: 0.15), value: isSplitDividerHovering)
-            .onHover { isHovering in
-                isSplitDividerHovering = isHovering
-                if isHovering {
-                    NSCursor.resizeLeftRight.set()
-                } else {
-                    NSCursor.arrow.set()
-                }
-            }
-            .gesture(
-                DragGesture(minimumDistance: 0)
-                    .onChanged { value in
-                        if splitRatioAtDragStart == nil {
-                            splitRatioAtDragStart = clampedSplitRatio(for: totalWidth)
-                        }
-                        let availableWidth = max(1, totalWidth - splitDividerWidth)
-                        setSplitRatio((splitRatioAtDragStart ?? 0.5) + value.translation.width / availableWidth, in: totalWidth)
-                    }
-                    .onEnded { _ in
-                        splitRatioAtDragStart = nil
-                    }
-            )
-            .accessibilityElement(children: .ignore)
-            .accessibilityLabel("Split view divider")
-            .accessibilityValue("\(Int(clampedSplitRatio(for: totalWidth) * 100)) percent ChatGPT")
-            .accessibilityHint("Drag left or right to resize the ChatGPT and Claude panes")
-            .accessibilityAdjustableAction { direction in
-                let adjustment: CGFloat = direction == .increment ? 0.05 : -0.05
-                setSplitRatio(clampedSplitRatio(for: totalWidth) + adjustment, in: totalWidth)
-            }
-    }
-
     private func servicePane(_ service: ChatService) -> some View {
         VStack(spacing: 0) {
-            if appState.isSplitView {
-                HStack(spacing: 8) {
-                    Circle()
-                        .fill(providerColor(for: service))
-                        .frame(width: 9, height: 9)
-                    Text(service.title)
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(palette.primaryText)
-                    Spacer(minLength: 12)
-                }
-                .padding(.horizontal, 20)
-                .frame(height: 52)
-                .background(palette.paneHeader)
-                .overlay(alignment: .bottom) { hairline }
-            }
-
             ZStack {
                 BrowserView(
                     browser: appState.browser(for: service),
@@ -416,35 +322,26 @@ struct ContentView: View {
     }
 
     private var promptDrawer: some View {
-        Group {
-            if isComposerOpen {
-                expandedComposer
-            } else {
-                collapsedComposer
-            }
-        }
-        .background(palette.drawer)
+        expandedComposer
+        .background(.thinMaterial)
         .overlay(alignment: .top) { hairline }
     }
 
     private var expandedComposer: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
-                Text("PROMPT")
-                    .font(.system(size: 11, weight: .bold))
-                    .tracking(1.15)
-                    .foregroundStyle(palette.secondaryText)
+                Text("Prompt")
+                    .font(.headline)
                 Spacer()
                 Button {
                     isComposerOpen = false
                 } label: {
-                    Label("Collapse", systemImage: "chevron.down")
+                    Label("Close", systemImage: "xmark")
                         .font(.system(size: 13, weight: .semibold))
                         .foregroundStyle(palette.secondaryText)
                 }
                 .buttonStyle(.plain)
-                .keyboardShortcut("p", modifiers: [.command, .shift])
-                .help("Collapse prompt composer")
+                .help("Close shared prompt")
             }
 
             TextEditor(text: $appState.prompt)
@@ -462,25 +359,25 @@ struct ContentView: View {
                 Spacer()
                 if !appState.isSplitView {
                     Button("Send to Both") {
-                        sendAndCollapse(to: .both)
+                        sendFromDrawer(to: .both)
                     }
-                    .buttonStyle(PromptButtonStyle(kind: .secondary, palette: palette))
+                    .buttonStyle(.bordered)
                     .keyboardShortcut(.return, modifiers: [.command, .option])
                     .disabled(!hasPromptText)
                     .allowsHitTesting(canSend(to: .both))
 
                     Button("Send to \(appState.selectedService.title)") {
-                        sendAndCollapse(to: .current)
+                        sendFromDrawer(to: .current)
                     }
-                    .buttonStyle(PromptButtonStyle(kind: .primary, palette: palette))
+                    .buttonStyle(.borderedProminent)
                     .keyboardShortcut(.return, modifiers: [.command])
                     .disabled(!hasPromptText)
                     .allowsHitTesting(canSend(to: .current))
                 } else {
                     Button("Send to Both") {
-                        sendAndCollapse(to: .both)
+                        sendFromDrawer(to: .both)
                     }
-                    .buttonStyle(PromptButtonStyle(kind: .primary, palette: palette))
+                    .buttonStyle(.borderedProminent)
                     .keyboardShortcut(.return, modifiers: [.command])
                     .disabled(!hasPromptText)
                     .allowsHitTesting(canSend(to: .both))
@@ -491,7 +388,7 @@ struct ContentView: View {
         .padding(.vertical, 14)
     }
 
-    private func sendAndCollapse(to target: PromptTarget) {
+    private func sendFromDrawer(to target: PromptTarget) {
         guard canSend(to: target) else { return }
         isPreparingPromptDispatch = true
         Task {
@@ -500,10 +397,7 @@ struct ContentView: View {
                 appState.reportQuickPromptWorkspaceUnavailable(for: target)
                 return
             }
-            let results = await appState.send(to: target)
-            if !results.isEmpty && results.allSatisfy(\.wasSent) {
-                isComposerOpen = false
-            }
+            _ = await appState.send(to: target)
         }
     }
 
@@ -513,25 +407,6 @@ struct ContentView: View {
 
     private var hasPromptText: Bool {
         !appState.prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-    }
-
-    private var collapsedComposer: some View {
-        Button {
-            isComposerOpen = true
-        } label: {
-            HStack(spacing: 7) {
-                Image(systemName: "chevron.up")
-                Text("Prompt (⌘⇧P)")
-            }
-            .font(.system(size: 13, weight: .medium))
-            .foregroundStyle(palette.secondaryText)
-            .frame(maxWidth: .infinity)
-            .frame(height: 43)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .keyboardShortcut("p", modifiers: [.command, .shift])
-        .help("Open shared prompt")
     }
 
     private func dispatchToast(_ toast: DispatchToast) -> some View {
@@ -635,7 +510,7 @@ struct ContentView: View {
 
     private func verificationNotice(for service: ChatService) -> some View {
         VStack(spacing: 12) {
-            Image(systemName: "checkmark.shield.trianglebadge.exclamationmark")
+            Image(systemName: "exclamationmark.shield.fill")
                 .font(.system(size: 28))
                 .foregroundStyle(.orange)
             Text("\(service.title) needs browser verification")
@@ -694,16 +569,72 @@ private struct DispatchToast: Identifiable, Equatable {
     }
 }
 
+private struct NativeSplitRatioRestorer: NSViewRepresentable {
+    let ratio: Double
+    let minimumPaneWidth: CGFloat
+
+    func makeNSView(context: Context) -> SplitRatioMarkerView {
+        SplitRatioMarkerView(ratio: ratio, minimumPaneWidth: minimumPaneWidth)
+    }
+
+    func updateNSView(_ nsView: SplitRatioMarkerView, context: Context) { }
+}
+
+private final class SplitRatioMarkerView: NSView {
+    private let ratio: Double
+    private let minimumPaneWidth: CGFloat
+    private var hasRestored = false
+    private var attempts = 0
+
+    init(ratio: Double, minimumPaneWidth: CGFloat) {
+        self.ratio = ratio
+        self.minimumPaneWidth = minimumPaneWidth
+        super.init(frame: .zero)
+    }
+
+    required init?(coder: NSCoder) { nil }
+
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        guard window != nil else { return }
+        DispatchQueue.main.async { [weak self] in self?.restorePosition() }
+    }
+
+    private func restorePosition() {
+        guard !hasRestored, window != nil else { return }
+
+        var ancestor = superview
+        while let view = ancestor {
+            if let splitView = view as? NSSplitView {
+                let availableWidth = splitView.bounds.width - splitView.dividerThickness
+                if availableWidth >= 2 * minimumPaneWidth {
+                    let position = min(
+                        max(availableWidth * ratio, minimumPaneWidth),
+                        availableWidth - minimumPaneWidth
+                    )
+                    splitView.setPosition(position, ofDividerAt: 0)
+                    hasRestored = true
+                    return
+                }
+            }
+            ancestor = view.superview
+        }
+
+        guard attempts < 20 else { return }
+        attempts += 1
+        DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(50)) { [weak self] in
+            self?.restorePosition()
+        }
+    }
+}
+
 private struct AppPalette {
     let scheme: ColorScheme
 
     private var isDark: Bool { scheme == .dark }
-    var canvas: Color { isDark ? Color(red: 0.055, green: 0.06, blue: 0.07) : Color(red: 0.955, green: 0.952, blue: 0.94) }
-    var controlBar: Color { isDark ? Color(red: 0.085, green: 0.09, blue: 0.105) : Color(red: 0.94, green: 0.938, blue: 0.925) }
-    var paneHeader: Color { isDark ? Color(red: 0.075, green: 0.08, blue: 0.09) : Color(red: 0.985, green: 0.983, blue: 0.975) }
     var drawer: Color { isDark ? Color(red: 0.08, green: 0.085, blue: 0.10) : Color(red: 0.965, green: 0.963, blue: 0.95) }
-    var controlWell: Color { isDark ? Color(red: 0.035, green: 0.04, blue: 0.05) : Color(red: 0.89, green: 0.888, blue: 0.875) }
-    var selectedControl: Color { isDark ? Color(red: 0.17, green: 0.18, blue: 0.21) : .white }
     var textField: Color { isDark ? Color(red: 0.105, green: 0.11, blue: 0.13) : .white }
     var primaryText: Color { isDark ? Color(red: 0.91, green: 0.92, blue: 0.94) : Color(red: 0.10, green: 0.11, blue: 0.13) }
     var secondaryText: Color { isDark ? Color(red: 0.62, green: 0.64, blue: 0.68) : Color(red: 0.36, green: 0.38, blue: 0.42) }
@@ -715,7 +646,7 @@ private struct AppPalette {
     var accent: Color { Color(red: 0.34, green: 0.40, blue: 0.82) }
 }
 
-private enum LaunchDestination {
+private enum LaunchDestination: Hashable {
     case chatGPT
     case claude
     case both
@@ -739,6 +670,7 @@ private enum LaunchDestination {
 
 private struct ProviderMark: View {
     let service: ChatService
+    var size: CGFloat = 38
 
     private var image: NSImage? {
         let resourceName = service == .chatGPT ? "ChatGPT" : "Claude"
@@ -757,11 +689,11 @@ private struct ProviderMark: View {
                     .scaledToFit()
             } else {
                 Image(systemName: service == .chatGPT ? "circle.hexagongrid.fill" : "sparkles")
-                    .font(.system(size: 35, weight: .medium))
+                    .font(.system(size: size * 0.92, weight: .medium))
                     .foregroundStyle(service == .chatGPT ? Color(red: 0.25, green: 0.60, blue: 0.93) : Color(red: 0.92, green: 0.49, blue: 0.23))
             }
         }
-        .frame(width: 38, height: 38)
+        .frame(width: size, height: size)
         .accessibilityLabel(service.title)
     }
 }
@@ -788,35 +720,5 @@ private struct LaunchChoiceButtonStyle: ButtonStyle {
                 y: configuration.isPressed ? 1 : 3
             )
             .scaleEffect(configuration.isPressed ? 0.985 : 1)
-    }
-}
-
-private enum PromptButtonKind {
-    case primary
-    case secondary
-}
-
-private struct PromptButtonStyle: ButtonStyle {
-    let kind: PromptButtonKind
-    let palette: AppPalette
-
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .font(.system(size: 14, weight: .semibold))
-            .foregroundStyle(kind == .primary ? Color.white : palette.primaryText)
-            .padding(.horizontal, 16)
-            .frame(height: 36)
-            .background {
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .fill(kind == .primary ? palette.accent : palette.textField)
-                    .opacity(configuration.isPressed ? 0.82 : 1)
-            }
-            .overlay {
-                if kind == .secondary {
-                    RoundedRectangle(cornerRadius: 10, style: .continuous)
-                        .stroke(palette.fieldBorder, lineWidth: 1)
-                }
-            }
-            .opacity(configuration.isPressed ? 0.88 : 1)
     }
 }

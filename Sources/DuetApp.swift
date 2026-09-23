@@ -28,7 +28,6 @@ struct DuetApp: App {
                 }
         }
         .windowResizability(.contentMinSize)
-        .windowStyle(.hiddenTitleBar)
 
         Window("About Duet", id: "about") {
             AboutView()

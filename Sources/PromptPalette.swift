@@ -57,7 +57,7 @@ private final class QuickPromptPanelController: NSObject, NSWindowDelegate {
         self.appState = appState
         self.reopenWorkspace = reopenWorkspace
         panel = NSPanel(
-            contentRect: NSRect(x: 0, y: 0, width: 540, height: 234),
+            contentRect: NSRect(x: 0, y: 0, width: 500, height: 212),
             styleMask: [.titled, .closable, .fullSizeContentView, .utilityWindow],
             backing: .buffered,
             defer: false
@@ -65,16 +65,7 @@ private final class QuickPromptPanelController: NSObject, NSWindowDelegate {
         super.init()
 
         panel.title = "Quick Prompt"
-        panel.titleVisibility = .hidden
         panel.titlebarAppearsTransparent = true
-        panel.backgroundColor = NSColor(name: nil) { appearance in
-            if appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua {
-                NSColor(red: 0.055, green: 0.06, blue: 0.07, alpha: 1)
-            } else {
-                NSColor(red: 0.985, green: 0.983, blue: 0.975, alpha: 1)
-            }
-        }
-        panel.isMovableByWindowBackground = true
         panel.level = .floating
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         panel.isReleasedWhenClosed = false
@@ -154,86 +145,52 @@ private struct QuickPromptView: View {
 
     @State private var prompt = ""
     @FocusState private var isPromptFocused: Bool
-    @Environment(\.colorScheme) private var colorScheme
-
-    private var palette: QuickPromptPalette { QuickPromptPalette(scheme: colorScheme) }
 
     var body: some View {
-        VStack(spacing: 0) {
-            Rectangle()
-                .fill(palette.border)
-                .frame(height: 1)
-
-            VStack(alignment: .leading, spacing: 0) {
-                Text("Quick prompt")
-                    .font(.system(size: 20, weight: .bold))
-                    .foregroundStyle(palette.primaryText)
-
-                TextEditor(text: $prompt)
-                    .font(.system(size: 15))
-                    .scrollContentBackground(.hidden)
-                    .padding(10)
-                    .frame(height: 76)
-                    .background(palette.textField, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-                    .overlay {
-                        RoundedRectangle(cornerRadius: 10, style: .continuous)
-                            .stroke(palette.fieldBorder, lineWidth: 1)
-                    }
-                    .focused($isPromptFocused)
-                    .padding(.top, 16)
-
-                HStack(spacing: 10) {
-                    Spacer(minLength: 16)
-
-                    deliveryButton("ChatGPT", target: .service(.chatGPT))
-                    deliveryButton("Claude", target: .service(.claude))
-                    deliveryButton("Both", target: .both, prominent: true)
+        VStack(alignment: .leading, spacing: 16) {
+            TextEditor(text: $prompt)
+                .font(.system(size: 15))
+                .scrollContentBackground(.hidden)
+                .padding(8)
+                .frame(height: 92)
+                .background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 8))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 8)
+                        .stroke(.separator, lineWidth: 1)
                 }
-                .padding(.top, 16)
+                .focused($isPromptFocused)
+
+            HStack(spacing: 8) {
+                Spacer()
+                Button("ChatGPT") {
+                    send(to: .service(.chatGPT))
+                }
+                .buttonStyle(.bordered)
+                .disabled(!canSend(to: .service(.chatGPT)))
+                .accessibilityLabel("Send to ChatGPT")
+
+                Button("Claude") {
+                    send(to: .service(.claude))
+                }
+                .buttonStyle(.bordered)
+                .disabled(!canSend(to: .service(.claude)))
+                .accessibilityLabel("Send to Claude")
+
+                Button("Both") {
+                    send(to: .both)
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(!canSend(to: .both))
+                .accessibilityLabel("Send to ChatGPT and Claude")
             }
-            .padding(.horizontal, 42)
-            .padding(.top, 24)
-            .padding(.bottom, 24)
         }
-        .background(palette.canvas)
-        .frame(width: 540, alignment: .top)
-        .frame(maxHeight: .infinity, alignment: .top)
+        .padding(.horizontal, 20)
+        .padding(.top, 44)
+        .padding(.bottom, 20)
+        .frame(width: 500, height: 212)
+        .background(.thinMaterial)
         .onAppear {
             isPromptFocused = true
-        }
-    }
-
-    @ViewBuilder
-    private func deliveryButton(_ title: String, target: QuickPromptTarget, prominent: Bool = false) -> some View {
-        if prominent {
-            Button(title) {
-                send(to: target)
-            }
-            .buttonStyle(QuickPromptActionStyle(kind: .primary, palette: palette))
-            .disabled(!canSend(to: target))
-            .accessibilityLabel("Send to \(target.accessibilityName)")
-        } else {
-            Button {
-                send(to: target)
-            } label: {
-                HStack(spacing: 7) {
-                    Circle()
-                        .fill(providerColor(for: target))
-                        .frame(width: 8, height: 8)
-                    Text(title)
-                }
-            }
-            .buttonStyle(QuickPromptActionStyle(kind: .secondary, palette: palette))
-            .disabled(!canSend(to: target))
-            .accessibilityLabel("Send to \(target.accessibilityName)")
-        }
-    }
-
-    private func providerColor(for target: QuickPromptTarget) -> Color {
-        switch target {
-        case .service(.chatGPT): return Color(red: 0.25, green: 0.60, blue: 0.93)
-        case .service(.claude): return Color(red: 0.92, green: 0.49, blue: 0.23)
-        case .both: return palette.accent
         }
     }
 
@@ -267,52 +224,6 @@ private struct QuickPromptView: View {
     }
 }
 
-private struct QuickPromptPalette {
-    let scheme: ColorScheme
-
-    private var isDark: Bool { scheme == .dark }
-
-    var canvas: Color { isDark ? Color(red: 0.055, green: 0.06, blue: 0.07) : Color(red: 0.985, green: 0.983, blue: 0.975) }
-    var textField: Color { isDark ? Color(red: 0.105, green: 0.11, blue: 0.13) : .white }
-    var primaryText: Color { isDark ? Color(red: 0.91, green: 0.92, blue: 0.94) : Color(red: 0.10, green: 0.11, blue: 0.13) }
-    var border: Color { isDark ? Color.white.opacity(0.10) : Color.black.opacity(0.12) }
-    var fieldBorder: Color { isDark ? Color.white.opacity(0.16) : Color.black.opacity(0.16) }
-    var accent: Color { Color(red: 0.34, green: 0.40, blue: 0.82) }
-}
-
-private struct QuickPromptActionStyle: ButtonStyle {
-    enum Kind {
-        case primary
-        case secondary
-    }
-
-    let kind: Kind
-    let palette: QuickPromptPalette
-
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .font(.system(size: 14, weight: .semibold))
-            .foregroundStyle(kind == .primary ? Color.white : palette.primaryText)
-            .padding(.horizontal, 14)
-            .frame(minHeight: 36)
-            .background(background(for: configuration))
-            .overlay {
-                if kind == .secondary {
-                    RoundedRectangle(cornerRadius: 10, style: .continuous)
-                        .stroke(palette.fieldBorder, lineWidth: 1)
-                }
-            }
-            .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-            .opacity(configuration.isPressed ? 0.82 : 1)
-    }
-
-    @ViewBuilder
-    private func background(for configuration: Configuration) -> some View {
-        RoundedRectangle(cornerRadius: 10, style: .continuous)
-            .fill(kind == .primary ? palette.accent.opacity(configuration.isPressed ? 0.86 : 1) : palette.textField)
-    }
-}
-
 private enum QuickPromptTarget {
     case service(ChatService)
     case both
@@ -321,13 +232,6 @@ private enum QuickPromptTarget {
         switch self {
         case .service(let service): .service(service)
         case .both: .both
-        }
-    }
-
-    var accessibilityName: String {
-        switch self {
-        case .service(let service): service.title
-        case .both: "ChatGPT and Claude"
         }
     }
 }

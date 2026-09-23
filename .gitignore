@@ -1,6 +1,7 @@
 # Local build output
 .build/
 dist/
+.duet-signing-identity
 
 # Generated release archive (published through GitHub Releases)
 /Duet.zip

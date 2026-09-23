@@ -24,6 +24,10 @@ if [[ ! -f "$LICENSE_FILE" ]]; then
 fi
 
 codesign --verify --deep --strict --verbose=2 "$APP_BUNDLE"
+if ! codesign -dv "$APP_BUNDLE" 2>&1 | grep -qx 'Signature=adhoc'; then
+  echo "Release bundle must be ad-hoc signed. Run DUET_SIGNING_IDENTITY=- ./build.sh first." >&2
+  exit 1
+fi
 
 APP_VERSION=$(plutil -extract CFBundleShortVersionString raw "$APP_BUNDLE/Contents/Info.plist")
 BUILD_VERSION=$(plutil -extract CFBundleVersion raw "$APP_BUNDLE/Contents/Info.plist")

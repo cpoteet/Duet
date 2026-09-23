@@ -67,7 +67,11 @@ if [[ -f "$ICON_SOURCE" ]]; then
   iconutil -c icns "$ICONSET" -o "$APP_BUNDLE/Contents/Resources/Duet.icns"
 fi
 
-codesign --force --sign - "$APP_BUNDLE" >/dev/null
+SIGNING_IDENTITY="${DUET_SIGNING_IDENTITY:-}"
+if [[ -z "$SIGNING_IDENTITY" && -f "$ROOT/.duet-signing-identity" ]]; then
+  SIGNING_IDENTITY=$(< "$ROOT/.duet-signing-identity")
+fi
+codesign --force --sign "${SIGNING_IDENTITY:--}" "$APP_BUNDLE" >/dev/null
 
 open "$APP_BUNDLE"
 echo "Built and launched: $APP_BUNDLE"

@@ -97,27 +97,6 @@ enum DuetWindowRegistry {
 }
 
 @MainActor
-struct WorkspaceWindowSnapshot {
-    private let visibilityByWindow: [ObjectIdentifier: Bool]
-
-    init(windows: [NSWindow]) {
-        visibilityByWindow = Dictionary(uniqueKeysWithValues: windows.map {
-            (ObjectIdentifier($0), $0.isVisible || $0.isMiniaturized)
-        })
-    }
-
-    func reopenedWorkspaceWindow(in windows: [NSWindow]) -> NSWindow? {
-        windows.first { window in
-            guard !(window is NSPanel), window.isVisible || window.isMiniaturized else {
-                return false
-            }
-
-            return visibilityByWindow[ObjectIdentifier(window)] != true
-        }
-    }
-}
-
-@MainActor
 final class WorkspaceWindowMarkerView: NSView {
     private static var hasCenteredWorkspaceThisLaunch = false
 

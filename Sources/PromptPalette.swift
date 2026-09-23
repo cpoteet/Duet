@@ -100,13 +100,11 @@ private final class QuickPromptPanelController: NSObject, NSWindowDelegate {
             return
         }
 
-        let windowSnapshot = WorkspaceWindowSnapshot(windows: NSApp.windows)
         reopenWorkspace()
-        focusReopenedWorkspace(after: windowSnapshot)
+        focusReopenedWorkspace()
     }
 
     private func focusReopenedWorkspace(
-        after windowSnapshot: WorkspaceWindowSnapshot,
         attemptsRemaining: Int = 40
     ) {
         DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(50)) { [weak self] in
@@ -114,12 +112,8 @@ private final class QuickPromptPanelController: NSObject, NSWindowDelegate {
 
             if let workspaceWindow = DuetWindowRegistry.visibleWorkspaceWindow() {
                 self.focus(workspaceWindow)
-            } else if let reopenedWindow = windowSnapshot.reopenedWorkspaceWindow(in: NSApp.windows) {
-                DuetWindowRegistry.register(reopenedWindow)
-                self.focus(reopenedWindow)
             } else if attemptsRemaining > 1 {
                 self.focusReopenedWorkspace(
-                    after: windowSnapshot,
                     attemptsRemaining: attemptsRemaining - 1
                 )
             }
@@ -144,11 +138,15 @@ private struct QuickPromptView: View {
     let revealWorkspace: () -> Void
 
     @State private var prompt = ""
+    @State private var promptRevision = 0
     @FocusState private var isPromptFocused: Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            TextEditor(text: $prompt)
+            TextEditor(text: Binding(
+                get: { prompt },
+                set: { prompt = $0; promptRevision &+= 1 }
+            ))
                 .font(.system(size: 15))
                 .scrollContentBackground(.hidden)
                 .padding(8)
@@ -166,21 +164,21 @@ private struct QuickPromptView: View {
                     send(to: .service(.chatGPT))
                 }
                 .buttonStyle(.bordered)
-                .disabled(!canSend(to: .service(.chatGPT)))
+                .disabled(!canSend)
                 .accessibilityLabel("Send to ChatGPT")
 
                 Button("Claude") {
                     send(to: .service(.claude))
                 }
                 .buttonStyle(.bordered)
-                .disabled(!canSend(to: .service(.claude)))
+                .disabled(!canSend)
                 .accessibilityLabel("Send to Claude")
 
                 Button("Both") {
                     send(to: .both)
                 }
                 .buttonStyle(.borderedProminent)
-                .disabled(!canSend(to: .both))
+                .disabled(!canSend)
                 .accessibilityLabel("Send to ChatGPT and Claude")
             }
         }
@@ -194,13 +192,14 @@ private struct QuickPromptView: View {
         }
     }
 
-    private func canSend(to target: QuickPromptTarget) -> Bool {
+    private var canSend: Bool {
         !prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             && !appState.hasActiveOperations
     }
 
     private func send(to target: QuickPromptTarget) {
         let text = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        let submittedRevision = promptRevision
         guard !text.isEmpty else { return }
 
         guard appState.openQuickPromptWorkspace(for: target.promptTarget) else { return }
@@ -217,7 +216,7 @@ private struct QuickPromptView: View {
                 to: target.promptTarget,
                 startingNewConversations: true
             )
-            if !results.isEmpty && results.allSatisfy(\.wasSent) {
+            if !results.isEmpty && results.allSatisfy(\.wasSent), promptRevision == submittedRevision {
                 prompt = ""
             }
         }

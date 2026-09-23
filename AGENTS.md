@@ -12,7 +12,7 @@ Duet is a personal Apple Silicon macOS 15+ app for using ChatGPT and Claude in a
 ## Structure and commands
 
 - Keep Swift source in `Sources/`, bundle resources in `Resources/`, and tests and fixtures in `Tests/`.
-- Build with `./build.sh`. It closes a running Duet instance, compiles using the local `swiftc` toolchain, assembles and ad-hoc signs `dist/Duet.app`, then launches the fresh build.
+- Build with `./build.sh`. It closes a running Duet instance, compiles using the local `swiftc` toolchain, assembles `dist/Duet.app`, signs it ad-hoc by default or with the configured local development identity, then launches the fresh build.
 - Test with `./test.sh`.
 - Package with `./package.sh`. It verifies the built app and creates the ignored `Duet.zip` release asset with `Duet.app` and `LICENSE.md` at the archive root.
 - Before handing off a release, verify the app bundle metadata and ad-hoc signature, then smoke-test the built app when practical.

@@ -1,5 +1,6 @@
 import AppKit
 import Combine
+import Darwin
 import SwiftUI
 import WebKit
 
@@ -22,6 +23,7 @@ final class BrowserController: NSObject, ObservableObject {
     private var phaseBeforeProvisionalNavigation: BrowserPhase?
     private var phaseRestoredForMainFrameDownload: BrowserPhase?
     private weak var mainFrameDownload: WKDownload?
+    private var downloadDestinations: [ObjectIdentifier: (staging: URL, destination: URL)] = [:]
 
     init(service: ChatService) {
         self.service = service
@@ -332,10 +334,12 @@ final class BrowserController: NSObject, ObservableObject {
         originProtocol: String,
         originHost: String,
         frameURL: URL?,
+        currentPageURL: URL?,
         type: WKMediaCaptureType
     ) -> WKPermissionDecision {
         guard service.allowsMediaCapture(originProtocol: originProtocol, host: originHost),
-              service.allowsPromptInjection(at: frameURL) else {
+              service.allowsNativePermission(at: frameURL),
+              service.allowsNativePermission(at: currentPageURL) else {
             return .deny
         }
 
@@ -589,17 +593,9 @@ extension BrowserController: WKDownloadDelegate {
                 return
             }
 
-            do {
-                // NSSavePanel already confirms replacement. WKDownload requires
-                // a destination URL that does not exist when downloading begins.
-                if FileManager.default.fileExists(atPath: destination.path) {
-                    try FileManager.default.removeItem(at: destination)
-                }
-                completionHandler(destination)
-            } catch {
-                completionHandler(nil)
-                self.presentDownloadError(error)
-            }
+            let staging = DownloadFileReplacement.stagingURL(for: destination)
+            self.downloadDestinations[ObjectIdentifier(download)] = (staging, destination)
+            completionHandler(staging)
         }
 
         if let window = webView?.window ?? NSApp.keyWindow {
@@ -623,6 +619,9 @@ extension BrowserController: WKDownloadDelegate {
         resumeData: Data?
     ) {
         completeMainFrameDownload(download)
+        if let files = downloadDestinations.removeValue(forKey: ObjectIdentifier(download)) {
+            DownloadFileReplacement.discard(files.staging)
+        }
         let nsError = error as NSError
         guard !(nsError.domain == NSURLErrorDomain && nsError.code == NSURLErrorCancelled) else { return }
         presentDownloadError(error)
@@ -630,6 +629,13 @@ extension BrowserController: WKDownloadDelegate {
 
     func downloadDidFinish(_ download: WKDownload) {
         completeMainFrameDownload(download)
+        guard let files = downloadDestinations.removeValue(forKey: ObjectIdentifier(download)) else { return }
+        do {
+            try DownloadFileReplacement.commit(files.staging, to: files.destination)
+        } catch {
+            DownloadFileReplacement.discard(files.staging)
+            presentDownloadError(error)
+        }
     }
 
     private static func safeDownloadFilename(_ suggestedFilename: String) -> String {
@@ -690,6 +696,7 @@ extension BrowserController: WKUIDelegate {
                 originProtocol: origin.protocol,
                 originHost: origin.host,
                 frameURL: frame.request.url,
+                currentPageURL: webView.url,
                 type: type
             ))
         }
@@ -733,6 +740,23 @@ extension BrowserController: WKUIDelegate {
             }
             return nil
         }
+    }
+}
+
+enum DownloadFileReplacement {
+    static func stagingURL(for destination: URL) -> URL {
+        destination.deletingLastPathComponent()
+            .appendingPathComponent(".duet-\(UUID().uuidString).download")
+    }
+
+    static func commit(_ staging: URL, to destination: URL) throws {
+        guard rename(staging.path, destination.path) == 0 else {
+            throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
+        }
+    }
+
+    static func discard(_ staging: URL) {
+        try? FileManager.default.removeItem(at: staging)
     }
 }
 

@@ -303,22 +303,13 @@ struct ContentView: View {
     }
 
     private func servicePane(_ service: ChatService) -> some View {
-        VStack(spacing: 0) {
-            ZStack {
-                BrowserView(
-                    browser: appState.browser(for: service),
-                    acceptsKeyboardInput: appState.isSplitView || appState.selectedService == service
-                ) {
-                    appState.browserDidMount(service)
-                }
-                .id(service)
-                if appState.browser(for: service).phase == .verificationRequired {
-                    verificationNotice(for: service)
-                }
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        ObservedServicePane(
+            service: service,
+            browser: appState.browser(for: service),
+            acceptsKeyboardInput: appState.isSplitView || appState.selectedService == service
+        ) {
+            appState.browserDidMount(service)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     private var promptDrawer: some View {
@@ -356,6 +347,13 @@ struct ContentView: View {
                 }
 
             HStack {
+                if isPreparingPromptDispatch || !appState.activeDispatchServices.isEmpty {
+                    ProgressView()
+                        .controlSize(.small)
+                    Text("Sending…")
+                        .font(.caption)
+                        .foregroundStyle(palette.secondaryText)
+                }
                 Spacer()
                 if !appState.isSplitView {
                     Button("Send to Both") {
@@ -363,24 +361,21 @@ struct ContentView: View {
                     }
                     .buttonStyle(.bordered)
                     .keyboardShortcut(.return, modifiers: [.command, .option])
-                    .disabled(!hasPromptText)
-                    .allowsHitTesting(canSend(to: .both))
+                    .disabled(!canSend(to: .both))
 
                     Button("Send to \(appState.selectedService.title)") {
                         sendFromDrawer(to: .current)
                     }
                     .buttonStyle(.borderedProminent)
                     .keyboardShortcut(.return, modifiers: [.command])
-                    .disabled(!hasPromptText)
-                    .allowsHitTesting(canSend(to: .current))
+                    .disabled(!canSend(to: .current))
                 } else {
                     Button("Send to Both") {
                         sendFromDrawer(to: .both)
                     }
                     .buttonStyle(.borderedProminent)
                     .keyboardShortcut(.return, modifiers: [.command])
-                    .disabled(!hasPromptText)
-                    .allowsHitTesting(canSend(to: .both))
+                    .disabled(!canSend(to: .both))
                 }
             }
         }
@@ -390,6 +385,7 @@ struct ContentView: View {
 
     private func sendFromDrawer(to target: PromptTarget) {
         guard canSend(to: target) else { return }
+        let draft = appState.capturePromptDraft()
         isPreparingPromptDispatch = true
         Task {
             defer { isPreparingPromptDispatch = false }
@@ -397,7 +393,7 @@ struct ContentView: View {
                 appState.reportQuickPromptWorkspaceUnavailable(for: target)
                 return
             }
-            _ = await appState.send(to: target)
+            _ = await appState.send(draft: draft, to: target)
         }
     }
 
@@ -508,34 +504,6 @@ struct ContentView: View {
         }
     }
 
-    private func verificationNotice(for service: ChatService) -> some View {
-        VStack(spacing: 12) {
-            Image(systemName: "exclamationmark.shield.fill")
-                .font(.system(size: 28))
-                .foregroundStyle(.orange)
-            Text("\(service.title) needs browser verification")
-                .font(.headline)
-                .foregroundStyle(palette.primaryText)
-            Text("The provider returned a verification page that this embedded WebKit view could not complete.")
-                .multilineTextAlignment(.center)
-                .foregroundStyle(palette.secondaryText)
-                .frame(maxWidth: 330)
-            HStack {
-                Button("Retry here") { appState.browser(for: service).reload() }
-                Button("Open in browser") { appState.browser(for: service).openInDefaultBrowser() }
-                    .buttonStyle(.borderedProminent)
-            }
-        }
-        .padding(24)
-        .background(palette.drawer, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .stroke(palette.border, lineWidth: 1)
-        }
-        .shadow(color: .black.opacity(0.18), radius: 14, y: 5)
-        .padding(24)
-    }
-
     private func providerColor(for service: ChatService) -> Color {
         switch service {
         case .chatGPT: return Color(red: 0.25, green: 0.60, blue: 0.93)
@@ -549,6 +517,55 @@ struct ContentView: View {
             .frame(height: 1)
     }
 
+}
+
+private struct ObservedServicePane: View {
+    let service: ChatService
+    @ObservedObject var browser: BrowserController
+    let acceptsKeyboardInput: Bool
+    let onMounted: () -> Void
+    @Environment(\.colorScheme) private var colorScheme
+
+    private var palette: AppPalette { AppPalette(scheme: colorScheme) }
+
+    var body: some View {
+        ZStack {
+            BrowserView(browser: browser, acceptsKeyboardInput: acceptsKeyboardInput, onMounted: onMounted)
+                .id(service)
+            if browser.phase == .verificationRequired {
+                verificationNotice
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private var verificationNotice: some View {
+        VStack(spacing: 12) {
+            Image(systemName: "exclamationmark.shield.fill")
+                .font(.system(size: 28))
+                .foregroundStyle(.orange)
+            Text("\(service.title) needs browser verification")
+                .font(.headline)
+                .foregroundStyle(palette.primaryText)
+            Text("The provider returned a verification page that this embedded WebKit view could not complete.")
+                .multilineTextAlignment(.center)
+                .foregroundStyle(palette.secondaryText)
+                .frame(maxWidth: 330)
+            HStack {
+                Button("Retry here") { browser.reload() }
+                Button("Open in browser") { browser.openInDefaultBrowser() }
+                    .buttonStyle(.borderedProminent)
+            }
+        }
+        .padding(24)
+        .background(palette.drawer, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .stroke(palette.border, lineWidth: 1)
+        }
+        .shadow(color: .black.opacity(0.18), radius: 14, y: 5)
+        .padding(24)
+    }
 }
 
 private struct DispatchToast: Identifiable, Equatable {
@@ -580,7 +597,7 @@ private struct NativeSplitRatioRestorer: NSViewRepresentable {
     func updateNSView(_ nsView: SplitRatioMarkerView, context: Context) { }
 }
 
-private final class SplitRatioMarkerView: NSView {
+final class SplitRatioMarkerView: NSView {
     private let ratio: Double
     private let minimumPaneWidth: CGFloat
     private var hasRestored = false
@@ -611,7 +628,7 @@ private final class SplitRatioMarkerView: NSView {
                 let availableWidth = splitView.bounds.width - splitView.dividerThickness
                 if availableWidth >= 2 * minimumPaneWidth {
                     let position = min(
-                        max(availableWidth * ratio, minimumPaneWidth),
+                        max(splitView.bounds.width * ratio, minimumPaneWidth),
                         availableWidth - minimumPaneWidth
                     )
                     splitView.setPosition(position, ofDividerAt: 0)
@@ -638,7 +655,6 @@ private struct AppPalette {
     var textField: Color { isDark ? Color(red: 0.105, green: 0.11, blue: 0.13) : .white }
     var primaryText: Color { isDark ? Color(red: 0.91, green: 0.92, blue: 0.94) : Color(red: 0.10, green: 0.11, blue: 0.13) }
     var secondaryText: Color { isDark ? Color(red: 0.62, green: 0.64, blue: 0.68) : Color(red: 0.36, green: 0.38, blue: 0.42) }
-    var tertiaryText: Color { isDark ? Color(red: 0.45, green: 0.47, blue: 0.51) : Color(red: 0.50, green: 0.52, blue: 0.56) }
     var border: Color { isDark ? Color.white.opacity(0.10) : Color.black.opacity(0.12) }
     var fieldBorder: Color { isDark ? Color.white.opacity(0.16) : Color.black.opacity(0.16) }
     var success: Color { Color(red: 0.20, green: 0.64, blue: 0.42) }

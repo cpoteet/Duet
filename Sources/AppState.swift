@@ -1,18 +1,26 @@
 import Combine
 import Foundation
 
+struct PromptDraftSnapshot {
+    let text: String
+    let revision: Int
+}
+
 @MainActor
 final class AppState: ObservableObject {
     @Published var selectedService: ChatService = .chatGPT
     @Published var isSplitView = false
     @Published private(set) var isLaunchChooserVisible = true
-    @Published var prompt = ""
+    @Published var prompt = "" {
+        didSet { promptRevision &+= 1 }
+    }
     @Published private(set) var activeDispatchServices: Set<ChatService> = []
     @Published private(set) var resettingServices: Set<ChatService> = []
     @Published private(set) var dispatchNotice: DispatchNotice?
     @Published private(set) var updateAvailable: UpdateInfo?
 
     private let browsers: [ChatService: BrowserController]
+    private var promptRevision = 0
     private var keepsProvidersLoaded = false
     private var mountedBrowserServices: Set<ChatService> = []
     private var inactiveBrowserReleaseTask: Task<Void, Never>?
@@ -170,10 +178,19 @@ final class AppState: ObservableObject {
     }
 
     @discardableResult
-    func send(to target: PromptTarget) async -> [PromptDispatchResult] {
-        let results = await send(prompt: prompt, to: target)
+    func capturePromptDraft() -> PromptDraftSnapshot {
+        PromptDraftSnapshot(text: prompt, revision: promptRevision)
+    }
+
+    func clearPrompt(ifUnchanged draft: PromptDraftSnapshot) {
+        guard promptRevision == draft.revision, prompt == draft.text else { return }
+        prompt = ""
+    }
+
+    func send(draft: PromptDraftSnapshot, to target: PromptTarget) async -> [PromptDispatchResult] {
+        let results = await send(prompt: draft.text, to: target)
         if !results.isEmpty && results.allSatisfy(\.wasSent) {
-            prompt = ""
+            clearPrompt(ifUnchanged: draft)
         }
         return results
     }

@@ -128,6 +128,10 @@ enum ChatService: String, CaseIterable, Identifiable, Hashable {
         return promptHosts.contains { hostMatches(host, domain: $0) }
     }
 
+    func allowsNativePermission(at url: URL?) -> Bool {
+        allowsPromptInjection(at: url) && !isAuthenticationPage(url)
+    }
+
     func allowsMediaCapture(originProtocol: String, host: String) -> Bool {
         guard originProtocol.lowercased() == "https" else { return false }
         let normalizedHost = host.lowercased()

@@ -433,9 +433,6 @@ struct HostLifecycleTests {
             defer: false
         )
         existingVisibleWindow.orderFront(nil)
-        let workspaceWindowSnapshot = WorkspaceWindowSnapshot(
-            windows: [identifiedWorkspaceWindow, existingVisibleWindow]
-        )
         let replacementWorkspaceWindow = NSWindow(
             contentRect: .init(x: 0, y: 0, width: 400, height: 400),
             styleMask: [.titled],
@@ -450,16 +447,12 @@ struct HostLifecycleTests {
             "A closed registered workspace should not be treated as a restorable visible window"
         )
         expect(
-            workspaceWindowSnapshot.reopenedWorkspaceWindow(
+            DuetWindowRegistry.visibleWorkspaceWindow(
                 in: [existingVisibleWindow, replacementWorkspaceWindow]
-            ) === replacementWorkspaceWindow,
-            "Workspace restoration should select the newly shown replacement, not an existing visible window"
+            ) == nil,
+            "A newly visible unidentified window must not become the workspace"
         )
-        if let reopenedWorkspaceWindow = workspaceWindowSnapshot.reopenedWorkspaceWindow(
-            in: [existingVisibleWindow, replacementWorkspaceWindow]
-        ) {
-            DuetWindowRegistry.register(reopenedWorkspaceWindow)
-        }
+        DuetWindowRegistry.register(replacementWorkspaceWindow)
         expect(
             replacementWorkspaceWindow.identifier == DuetWindowIdentifier.workspace,
             "A replacement workspace should receive the stable workspace identifier immediately"
@@ -544,6 +537,7 @@ struct HostLifecycleTests {
                 originProtocol: "https",
                 originHost: "www.chatgpt.com",
                 frameURL: URL(string: "https://www.chatgpt.com/c/123"),
+                currentPageURL: URL(string: "https://www.chatgpt.com/c/123"),
                 type: .microphone
             ) == .grant,
             "Trusted provider microphone requests should not prompt again"
@@ -554,6 +548,7 @@ struct HostLifecycleTests {
                 originProtocol: "https",
                 originHost: "www.chatgpt.com",
                 frameURL: URL(string: "https://www.chatgpt.com/c/123"),
+                currentPageURL: URL(string: "https://www.chatgpt.com/c/123"),
                 type: .camera
             ) == .prompt,
             "Camera requests should preserve WebKit's user prompt"
@@ -564,6 +559,7 @@ struct HostLifecycleTests {
                 originProtocol: "https",
                 originHost: "example.com",
                 frameURL: URL(string: "https://www.chatgpt.com/c/123"),
+                currentPageURL: URL(string: "https://www.chatgpt.com/c/123"),
                 type: .microphone
             ) == .deny,
             "Foreign origins must not receive microphone access"
@@ -574,9 +570,32 @@ struct HostLifecycleTests {
                 originProtocol: "https",
                 originHost: "www.chatgpt.com",
                 frameURL: URL(string: "https://accounts.google.com/signin"),
+                currentPageURL: URL(string: "https://www.chatgpt.com/c/123"),
                 type: .microphone
             ) == .deny,
             "Authentication frames must not receive microphone access"
+        )
+        expect(
+            BrowserController.mediaCapturePermissionDecision(
+                service: .chatGPT,
+                originProtocol: "https",
+                originHost: "www.chatgpt.com",
+                frameURL: URL(string: "https://www.chatgpt.com/login"),
+                currentPageURL: URL(string: "https://www.chatgpt.com/login"),
+                type: .microphone
+            ) == .deny,
+            "Provider login pages must not receive microphone access"
+        )
+        expect(
+            BrowserController.mediaCapturePermissionDecision(
+                service: .claude,
+                originProtocol: "https",
+                originHost: "claude.ai",
+                frameURL: URL(string: "https://claude.ai/new"),
+                currentPageURL: URL(string: "https://claude.ai/login"),
+                type: .microphone
+            ) == .deny,
+            "A trusted frame must not override an authentication main page"
         )
         expect(
             browserController.responds(to: responsePolicySelector),
@@ -622,6 +641,46 @@ struct HostLifecycleTests {
             ),
             "Responses with unsupported MIME types should become downloads"
         )
+        do {
+            let directory = FileManager.default.temporaryDirectory
+                .appendingPathComponent("DuetDownloadTests-\(UUID().uuidString)")
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            defer { try? FileManager.default.removeItem(at: directory) }
+            let destination = directory.appendingPathComponent("saved.txt")
+            try "original".write(to: destination, atomically: true, encoding: .utf8)
+
+            let staging = DownloadFileReplacement.stagingURL(for: destination)
+            expect(!FileManager.default.fileExists(atPath: staging.path), "A staged download path must start empty")
+            try "replacement".write(to: staging, atomically: true, encoding: .utf8)
+            let inProgressContent = try String(contentsOf: destination, encoding: .utf8)
+            expect(inProgressContent == "original", "An in-progress download must preserve the original")
+            try DownloadFileReplacement.commit(staging, to: destination)
+            let completedContent = try String(contentsOf: destination, encoding: .utf8)
+            expect(completedContent == "replacement", "A completed download should replace the original")
+
+            for reason in ["failure", "cancellation"] {
+                let partial = DownloadFileReplacement.stagingURL(for: destination)
+                try "partial".write(to: partial, atomically: true, encoding: .utf8)
+                DownloadFileReplacement.discard(partial)
+                let retainedContent = try String(contentsOf: destination, encoding: .utf8)
+                expect(retainedContent == "replacement", "Download \(reason) must preserve the existing file")
+                expect(!FileManager.default.fileExists(atPath: partial.path), "Download \(reason) must remove the partial file")
+            }
+
+            let existingDirectory = directory.appendingPathComponent("existing-folder")
+            try FileManager.default.createDirectory(at: existingDirectory, withIntermediateDirectories: true)
+            let failedStaging = DownloadFileReplacement.stagingURL(for: existingDirectory)
+            try "replacement".write(to: failedStaging, atomically: true, encoding: .utf8)
+            do {
+                try DownloadFileReplacement.commit(failedStaging, to: existingDirectory)
+                failures.append("A failed final replacement should report an error")
+            } catch {
+                expect(FileManager.default.fileExists(atPath: existingDirectory.path), "A failed replacement must preserve its destination")
+                DownloadFileReplacement.discard(failedStaging)
+            }
+        } catch {
+            failures.append("Download replacement test failed: \(error)")
+        }
         let downloadPhaseBrowser = BrowserController(service: .chatGPT)
         downloadPhaseBrowser.beginProvisionalNavigation()
         downloadPhaseBrowser.restorePhaseForMainFrameDownload()
@@ -759,6 +818,16 @@ struct HostLifecycleTests {
         )
 
         let promptDrawerState = AppState()
+        promptDrawerState.prompt = "First prompt"
+        let submittedDraft = promptDrawerState.capturePromptDraft()
+        promptDrawerState.prompt = "Second unsent draft"
+        promptDrawerState.clearPrompt(ifUnchanged: submittedDraft)
+        expect(promptDrawerState.prompt == "Second unsent draft", "A successful earlier send must preserve a newer draft")
+        promptDrawerState.prompt = "First prompt"
+        promptDrawerState.clearPrompt(ifUnchanged: submittedDraft)
+        expect(promptDrawerState.prompt == "First prompt", "Returning to identical text must still count as a newer edit")
+        promptDrawerState.clearPrompt(ifUnchanged: promptDrawerState.capturePromptDraft())
+        expect(promptDrawerState.prompt.isEmpty, "An unchanged submitted draft should clear after success")
         promptDrawerState.openWorkspace(for: .service(.chatGPT))
         promptDrawerState.browserDidMount(.chatGPT)
         var promptDrawerPreparationCompleted = false
@@ -791,6 +860,31 @@ struct HostLifecycleTests {
             promptDrawerPrepared,
             "Prompt drawer Both should wait for both split-pane browser hosts"
         )
+
+        let splitView = NSSplitView(frame: NSRect(x: 0, y: 0, width: 1_000, height: 600))
+        splitView.isVertical = true
+        splitView.addSubview(NSView(frame: .zero))
+        splitView.addSubview(NSView(frame: .zero))
+        let splitWindow = NSWindow(
+            contentRect: splitView.frame,
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        splitWindow.contentView = splitView
+        splitWindow.orderFront(nil)
+        splitView.adjustSubviews()
+        var savedRatio = 0.7
+        for _ in 0..<3 {
+            splitView.setPosition(500, ofDividerAt: 0)
+            let marker = SplitRatioMarkerView(ratio: savedRatio, minimumPaneWidth: 280)
+            splitView.subviews[0].addSubview(marker)
+            try? await Task.sleep(for: .milliseconds(100))
+            savedRatio = splitView.subviews[0].frame.width / splitView.bounds.width
+            expect(abs(savedRatio - 0.7) < 0.001, "Restoring split view repeatedly must not drift from the saved ratio")
+            marker.removeFromSuperview()
+        }
+        splitWindow.orderOut(nil)
 
         workspaceState.openQuickPromptWorkspace(for: .both)
         expect(workspaceState.isSplitView, "Quick Prompt Both destination should use a fresh split workspace")
@@ -1545,16 +1639,38 @@ struct HostLifecycleTests {
         )
         expect(!foreign.bridgeInstalled, "Non-provider origins must not receive the Duet location bridge", failures: &failures)
         expect(foreignProvider.highAccuracyRequests.isEmpty, "Non-provider pages must not request native location", failures: &failures)
-        try await testDirectForeignLocationAttempt(provider: foreignProvider, failures: &failures)
+        try await testDirectForeignLocationAttempt(
+            provider: foreignProvider,
+            service: .chatGPT,
+            baseURL: URL(string: "https://example.com")!,
+            failures: &failures
+        )
+
+        for (service, url) in [
+            (ChatService.chatGPT, URL(string: "https://www.chatgpt.com/login")!),
+            (.claude, URL(string: "https://claude.ai/login")!)
+        ] {
+            let loginProvider = RecordingLocationProvider(permissionState: .granted, result: .success(expectedPosition))
+            let login = try await runLocationFixture(fixtureHTML, baseURL: url, provider: loginProvider, service: service)
+            expect(!login.bridgeInstalled, "Provider login pages must not receive the Duet location bridge", failures: &failures)
+            try await testDirectForeignLocationAttempt(
+                provider: loginProvider,
+                service: service,
+                baseURL: url,
+                failures: &failures
+            )
+        }
     }
 
     @MainActor
     private static func testDirectForeignLocationAttempt(
         provider: RecordingLocationProvider,
+        service: ChatService,
+        baseURL: URL,
         failures: inout [String]
     ) async throws {
         let configuration = WKWebViewConfiguration()
-        let bridge = LocationBridge(service: .chatGPT, provider: provider)
+        let bridge = LocationBridge(service: service, provider: provider)
         bridge.install(in: configuration)
         let webView = WKWebView(
             frame: NSRect(x: 0, y: 0, width: 800, height: 600),
@@ -1567,7 +1683,7 @@ struct HostLifecycleTests {
         }
         try await loader.loadHTML(
             "<html><body>Foreign</body></html>",
-            baseURL: URL(string: "https://example.com")!,
+            baseURL: baseURL,
             in: webView
         )
         let handlerWasVisible: Bool = try await evaluate(
@@ -1585,7 +1701,7 @@ struct HostLifecycleTests {
         expect(handlerWasVisible, "The foreign location test must exercise the native handler", failures: &failures)
         expect(
             provider.highAccuracyRequests.isEmpty,
-            "A foreign origin must be rejected even when it calls the location handler directly",
+            "A disallowed page must be rejected even when it calls the location handler directly",
             failures: &failures
         )
     }

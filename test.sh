@@ -42,10 +42,19 @@ xcrun swiftc \
   "$ROOT/Sources/WebBrowser.swift" \
   "$ROOT/Sources/AppState.swift" \
   "$ROOT/Sources/WindowIdentity.swift" \
+  "$ROOT/Sources/ContentView.swift" \
   "$ROOT/Tests/HostLifecycleTests.swift" \
   -o "$BUILD_DIR/HostLifecycleTests"
 
 "$BUILD_DIR/HostLifecycleTests"
+
+xcrun swiftc \
+  -target arm64-apple-macos15.0 \
+  -swift-version 6 \
+  -strict-concurrency=complete \
+  -warnings-as-errors \
+  -typecheck \
+  "$ROOT"/Sources/*.swift
 
 MICROPHONE_USAGE_DESCRIPTION=$(
   plutil -extract NSMicrophoneUsageDescription raw "$ROOT/Resources/Info.plist"

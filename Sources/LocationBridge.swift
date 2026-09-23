@@ -186,7 +186,8 @@ enum LocationScript {
           const allowedHosts = \(allowedHostsJSON);
           const host = (location.hostname || '').toLowerCase();
           const allowed = allowedHosts.some(domain => host === domain || host.endsWith(`.${domain}`));
-          if (!allowed || window.__duetLocationBridgeInstalled) return;
+          const firstPath = location.pathname.split('/').filter(Boolean)[0]?.toLowerCase();
+          if (!allowed || ['auth', 'login', 'signin', 'sign-in'].includes(firstPath) || window.__duetLocationBridgeInstalled) return;
 
           const bridge = window.webkit?.messageHandlers?.\(handlerName);
           if (!bridge?.postMessage) return;
@@ -335,7 +336,9 @@ extension LocationBridge: WKScriptMessageHandlerWithReply {
             scheme: origin.protocol,
             host: origin.host,
             allowedHosts: service.webNotificationHosts
-        ) else { return (nil, nil) }
+        ), service.allowsNativePermission(at: message.frameInfo.request.url),
+           service.allowsNativePermission(at: message.webView?.url) else { return (nil, nil) }
+        let requestingPageURL = message.webView?.url
         guard let body = message.body as? [String: Any], let type = body["type"] as? String else {
             return (nil, nil)
         }
@@ -349,6 +352,10 @@ extension LocationBridge: WKScriptMessageHandlerWithReply {
             let position = try await provider.currentPosition(
                 enableHighAccuracy: body["enableHighAccuracy"] as? Bool ?? false
             )
+            guard message.webView?.url == requestingPageURL,
+                  service.allowsNativePermission(at: message.webView?.url) else {
+                return (["ok": false, "code": 1, "message": "Location permission was denied."], nil)
+            }
             return (position.webPayload, nil)
         } catch let error as LocationProviderError {
             return (["ok": false, "code": error.webCode, "message": error.message], nil)

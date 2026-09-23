@@ -46,7 +46,7 @@ xcrun swiftc \
   -o "$EXECUTABLE"
 
 for resource in "$ROOT"/Resources/*; do
-  [[ "${resource:t}" == "Info.plist" ]] && continue
+  [[ "${resource:t}" == "Info.plist" || "${resource:t}" == "Release.entitlements" ]] && continue
   cp -R "$resource" "$APP_BUNDLE/Contents/Resources/"
 done
 cp "$INFO_PLIST" "$APP_BUNDLE/Contents/Info.plist"
@@ -71,7 +71,19 @@ SIGNING_IDENTITY="${DUET_SIGNING_IDENTITY:-}"
 if [[ -z "$SIGNING_IDENTITY" && -f "$ROOT/.duet-signing-identity" ]]; then
   SIGNING_IDENTITY=$(< "$ROOT/.duet-signing-identity")
 fi
-codesign --force --sign "${SIGNING_IDENTITY:--}" "$APP_BUNDLE" >/dev/null
+if [[ "${DUET_RELEASE:-0}" == "1" ]]; then
+  codesign --force --sign "$SIGNING_IDENTITY" --options runtime --timestamp \
+    --entitlements "$ROOT/Resources/Release.entitlements" "$APP_BUNDLE" >/dev/null
+elif [[ "$SIGNING_IDENTITY" == "Developer ID Application: "* ]]; then
+  codesign --force --sign "$SIGNING_IDENTITY" --options runtime --timestamp=none \
+    --entitlements "$ROOT/Resources/Release.entitlements" "$APP_BUNDLE" >/dev/null
+else
+  codesign --force --sign "${SIGNING_IDENTITY:--}" "$APP_BUNDLE" >/dev/null
+fi
 
-open "$APP_BUNDLE"
-echo "Built and launched: $APP_BUNDLE"
+if [[ "${DUET_BUILD_ONLY:-0}" == "1" ]]; then
+  echo "Built: $APP_BUNDLE"
+else
+  open "$APP_BUNDLE"
+  echo "Built and launched: $APP_BUNDLE"
+fi

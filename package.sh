@@ -24,10 +24,14 @@ if [[ ! -f "$LICENSE_FILE" ]]; then
 fi
 
 codesign --verify --deep --strict --verbose=2 "$APP_BUNDLE"
-if ! codesign -dv "$APP_BUNDLE" 2>&1 | grep -qx 'Signature=adhoc'; then
-  echo "Release bundle must be ad-hoc signed. Run DUET_SIGNING_IDENTITY=- ./build.sh first." >&2
+SIGNATURE_DETAILS=$(codesign -dvv "$APP_BUNDLE" 2>&1)
+if ! grep -q '^Authority=Developer ID Application:' <<< "$SIGNATURE_DETAILS" || \
+   ! grep -q 'flags=.*runtime' <<< "$SIGNATURE_DETAILS"; then
+  echo "Release bundle must be Developer ID signed with hardened runtime. Run ./release.sh." >&2
   exit 1
 fi
+xcrun stapler validate "$APP_BUNDLE"
+spctl --assess --type execute --verbose=2 "$APP_BUNDLE"
 
 APP_VERSION=$(plutil -extract CFBundleShortVersionString raw "$APP_BUNDLE/Contents/Info.plist")
 BUILD_VERSION=$(plutil -extract CFBundleVersion raw "$APP_BUNDLE/Contents/Info.plist")
@@ -63,5 +67,7 @@ mkdir -p "$VERIFY_DIR"
 unzip -q "$ARCHIVE" -d "$VERIFY_DIR"
 cmp "$LICENSE_FILE" "$VERIFY_DIR/LICENSE.md"
 codesign --verify --deep --strict --verbose=2 "$VERIFY_DIR/$APP_NAME.app"
+xcrun stapler validate "$VERIFY_DIR/$APP_NAME.app"
+spctl --assess --type execute --verbose=2 "$VERIFY_DIR/$APP_NAME.app"
 
 echo "Packaged $APP_NAME $APP_VERSION: $ARCHIVE"

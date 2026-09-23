@@ -6,16 +6,16 @@ Duet is a personal Apple Silicon macOS 15+ app for using ChatGPT and Claude in a
 
 - Keep the project independent of Xcode project files and Swift Package Manager.
 - Target `arm64-apple-macos15.0`.
-- Notarization, App Store distribution, and Intel Mac support are out of scope.
+- App Store distribution and Intel Mac support are out of scope. Releases use Developer ID signing and notarization.
 - Keep the user-facing app and bundle name as `Duet`. Preserve the existing internal bundle identifier so saved sessions and preferences survive renames.
 
 ## Structure and commands
 
 - Keep Swift source in `Sources/`, bundle resources in `Resources/`, and tests and fixtures in `Tests/`.
-- Build with `./build.sh`. It closes a running Duet instance, compiles using the local `swiftc` toolchain, assembles `dist/Duet.app`, signs it ad-hoc by default or with the configured local development identity, then launches the fresh build.
+- Build with `./build.sh`. It closes a running Duet instance, compiles using the local `swiftc` toolchain, assembles `dist/Duet.app`, signs it ad-hoc by default or with the configured identity, then launches the fresh build.
 - Test with `./test.sh`.
-- Package with `./package.sh`. It verifies the built app and creates the ignored `Duet.zip` release asset with `Duet.app` and `LICENSE.md` at the archive root.
-- Before handing off a release, verify the app bundle metadata and ad-hoc signature, then smoke-test the built app when practical.
+- Release with `./release.sh`. It builds without launching, signs with Developer ID and hardened runtime, notarizes, staples, and calls `./package.sh` to create the ignored `Duet.zip` release asset with `Duet.app` and `LICENSE.md` at the archive root.
+- Before handing off a release, verify the app bundle metadata, Developer ID signature, notarization ticket, and Gatekeeper assessment, then smoke-test the built app when practical.
 - Keep `CFBundleShortVersionString` and `CFBundleVersion` aligned for each release; `build.sh` also enforces the marketing version in the assembled bundle.
 - Update notices read the latest published full GitHub Release. Tag production releases as `vX.Y.Z` and mark the intended release as Latest; drafts and prereleases do not notify, and clients predating the update checker require one manual upgrade.
 

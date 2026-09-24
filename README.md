@@ -35,27 +35,12 @@ Reminder that you use this application at your own risk.
 
 1. Launch Duet and choose **ChatGPT**, **Claude**, or **Both**. In Settings, you can instead choose a destination Duet should open automatically on future launches.
 2. Sign in directly in the embedded provider page. Complete any passkey, two-factor authentication, or verification steps there.
-3. When you first use provider dictation or audio chat, allow Duet to access the microphone in the macOS permission prompt.
-4. When a provider feature requests your precise location, choose whether to allow Duet's macOS location request. Duet shares it only with trusted ChatGPT and Claude pages that request it.
-5. Use the workspace picker in the toolbar to show **ChatGPT**, **Claude**, or **Both**. The **Layout** menu also switches between single and split view.
-6. For faster switching at the cost of additional memory, open **Duet → Settings** and enable **Keep both providers loaded**.
-7. Open **Prompt** in the toolbar, or press **Command–Shift–P**, when you want to enter a text-only prompt. Send it to the active provider or choose **Send to Both** to submit the same prompt to ChatGPT and Claude. Close the drawer when you are finished.
-8. From any app, press **Control–Option–Space** to open **Quick Prompt**. Choose **ChatGPT**, **Claude**, or **Both**; Duet brings its workspace forward and starts a fresh conversation with each selected provider. You can also open Quick Prompt from **Tools → Quick Prompt** while Duet is active.
-9. Read and continue each conversation inside its provider pane. Duet does not merge or scrape provider responses.
-
-## Build and release
-
-`./build.sh` builds and launches a local copy. To sign local builds with your Apple-issued certificate, create a Developer ID Application certificate in your Apple Developer account, install it with its private key in your login keychain, and put its full name (for example, `Developer ID Application: Your Name (TEAMID)`) in the ignored `.duet-signing-identity` file. Check the installed name with `security find-identity -p codesigning -v`. Developer ID local builds use the release hardened runtime and capabilities, but do not wait for notarization.
-
-For releases, save notarization credentials once in your keychain:
-
-```sh
-xcrun notarytool store-credentials duet-notary --apple-id YOUR_APPLE_ID --team-id YOUR_TEAM_ID
-```
-
-Replace `YOUR_APPLE_ID` with the email address of the Apple Account in your developer team and `YOUR_TEAM_ID` with that team's ID. At the secure prompt, enter an app-specific password generated for that same Apple Account, not its normal sign-in password. Then run `./test.sh` and `./release.sh`. The release command builds without launching Duet, signs with hardened runtime, submits a temporary archive for notarization, staples the accepted ticket to `dist/Duet.app`, and packages the signed app with `LICENSE.md` in `Duet.zip`. It verifies the signature, ticket, and Gatekeeper assessment before finishing. Do not publish the archive until you have smoke-tested the extracted app, preferably on another Mac.
-
-Keep the certificate private key and notarization credentials out of the repository. A new release build needs a new notarization submission. The Developer ID certificate must be installed before `./release.sh` can run.
+3. When you first use provider dictation or audio chat, allow Duet to access the microphone in the macOS permission prompt. The same applies to requests for your location.
+4. Use the workspace picker in the toolbar to show **ChatGPT**, **Claude**, or **Both**. The **Layout** menu also switches between single and split view.
+5. For faster switching at the cost of additional memory, open **Duet → Settings** and enable **Keep both providers loaded**.
+6. Open **Prompt** in the toolbar, or press **Command–Shift–P**, when you want to enter a text-only prompt. Send it to the active provider or choose **Send to Both** to submit the same prompt to ChatGPT and Claude. Close the drawer when you are finished.
+7. From any app, press **Control–Option–Space** to open **Quick Prompt**. Choose **ChatGPT**, **Claude**, or **Both**; Duet brings its workspace forward and starts a fresh conversation with each selected provider. You can also open Quick Prompt from **Tools → Quick Prompt** while Duet is active.
+8. Read and continue each conversation inside its provider pane. Duet does not merge or scrape provider responses.
 
 ## License
 

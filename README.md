@@ -27,7 +27,7 @@ Duet runs on Apple Silicon Macs with macOS 15 or later.
 
 1. Download `Duet.zip` from the [latest Duet release](https://github.com/cpoteet/Duet/releases/latest) and double-click it to extract the archive.
 2. Drag `Duet.app` to your **Applications** folder.
-3. Open Duet from Applications. A notarized release may show a standard first-open confirmation. The currently published v1.6.0 archive predates Developer ID notarization; if macOS says it cannot verify Duet, open **System Settings** → **Privacy & Security**, choose **Open Anyway**, and confirm.
+3. Open Duet from Applications. macOS may show a standard first-open confirmation.
 
 Reminder that you use this application at your own risk.
 

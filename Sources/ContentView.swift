@@ -183,47 +183,54 @@ struct ContentView: View {
         appState.openWorkspace(for: destination.promptTarget)
     }
 
+    private var selectedWorkspace: LaunchDestination {
+        appState.isSplitView ? .both :
+            (appState.selectedService == .chatGPT ? .chatGPT : .claude)
+    }
+
     private var workspacePicker: some View {
-        Picker("Workspace", selection: Binding(
-            get: {
-                appState.isSplitView ? LaunchDestination.both :
-                    (appState.selectedService == .chatGPT ? .chatGPT : .claude)
-            },
-            set: { appState.openWorkspace(for: $0.promptTarget) }
-        )) {
-            Label {
-                Text("ChatGPT")
-                    .padding(.trailing, 7)
-            } icon: {
-                ProviderMark(service: .chatGPT, size: 16)
-                    .accessibilityHidden(true)
-                    .padding(.trailing, 9)
-            }
-            .tag(LaunchDestination.chatGPT)
-            Label {
-                Text("Claude")
-            } icon: {
-                ProviderMark(service: .claude, size: 16)
-                    .accessibilityHidden(true)
-                    .padding(.trailing, 9)
-            }
-            .tag(LaunchDestination.claude)
-            Label {
-                Text("Both")
-            } icon: {
-                HStack(spacing: 2) {
-                    ProviderMark(service: .chatGPT, size: 14)
-                    ProviderMark(service: .claude, size: 14)
+        Menu {
+            Picker("Workspace", selection: Binding(
+                get: { selectedWorkspace },
+                set: { appState.openWorkspace(for: $0.promptTarget) }
+            )) {
+                Label {
+                    Text("ChatGPT")
+                } icon: {
+                    ProviderMark(service: .chatGPT, size: 16)
                 }
-                .accessibilityHidden(true)
-                .padding(.trailing, 9)
+                .tag(LaunchDestination.chatGPT)
+                Label {
+                    Text("Claude")
+                } icon: {
+                    ProviderMark(service: .claude, size: 16)
+                }
+                .tag(LaunchDestination.claude)
+                Label {
+                    Text("Both")
+                } icon: {
+                    Image(systemName: "rectangle.split.2x1")
+                }
+                .tag(LaunchDestination.both)
             }
-            .tag(LaunchDestination.both)
-            .accessibilityLabel("Both")
+            .pickerStyle(.inline)
+            .labelsHidden()
+        } label: {
+            HStack(spacing: 8) {
+                if selectedWorkspace == .both {
+                    HStack(spacing: 2) {
+                        ProviderMark(service: .chatGPT, size: 14)
+                        ProviderMark(service: .claude, size: 14)
+                    }
+                    .accessibilityHidden(true)
+                } else {
+                    ProviderMark(service: selectedWorkspace == .chatGPT ? .chatGPT : .claude, size: 16)
+                        .accessibilityHidden(true)
+                }
+                Text(selectedWorkspace.title)
+            }
         }
-        .labelsHidden()
         .labelStyle(.titleAndIcon)
-        .pickerStyle(.menu)
         .disabled(appState.hasActiveOperations)
         .help("Choose which providers to show")
     }

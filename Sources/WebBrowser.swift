@@ -101,8 +101,13 @@ final class BrowserController: NSObject, ObservableObject {
 
     func reload() {
         if let webView {
+            let needsFreshRequest = phase.failureMessage != nil || webView.url == nil
             beginProgrammaticNavigation()
-            webView.reload()
+            if needsFreshRequest {
+                webView.load(URLRequest(url: service.startURL))
+            } else {
+                webView.reload()
+            }
         } else {
             _ = acquire()
         }
@@ -298,7 +303,11 @@ final class BrowserController: NSObject, ObservableObject {
            Self.isDownloadNavigationInterruption(error) {
             phase = restoredPhase
         } else {
-            phase = .failed(error.localizedDescription)
+            let navigationError = error as NSError
+            let message = navigationError.domain == NSURLErrorDomain && navigationError.code == NSURLErrorTimedOut
+                ? "The page took too long to respond."
+                : error.localizedDescription
+            phase = .failed(message)
         }
         clearNavigationPhaseTracking()
     }

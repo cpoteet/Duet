@@ -702,6 +702,12 @@ struct HostLifecycleTests {
         } else {
             failures.append("A real navigation failure must remain visible after download classification")
         }
+        let timedOutBrowser = BrowserController(service: .claude)
+        timedOutBrowser.handleNavigationFailure(URLError(.timedOut))
+        expect(
+            timedOutBrowser.phase.failureMessage == "The page took too long to respond.",
+            "A Claude timeout should show a readable explanation"
+        )
         let observableBrowser = BrowserController(service: .chatGPT)
         var browserChangeCount = 0
         let browserChangeObserver = observableBrowser.objectWillChange.sink {

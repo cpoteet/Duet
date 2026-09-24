@@ -545,9 +545,45 @@ private struct ObservedServicePane: View {
                 .id(service)
             if browser.phase == .verificationRequired {
                 verificationNotice
+            } else if let message = browser.phase.failureMessage {
+                failureNotice(message)
+            } else if browser.phase == .loading && browser.webView?.url == nil {
+                ProgressView("Loading \(service.title)…")
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private func failureNotice(_ message: String) -> some View {
+        VStack(spacing: 12) {
+            Image(systemName: "exclamationmark.triangle")
+                .font(.system(size: 28))
+                .foregroundStyle(palette.secondaryText)
+            Text("\(service.title) didn't load")
+                .font(.headline)
+                .foregroundStyle(palette.primaryText)
+            Text(message)
+                .multilineTextAlignment(.center)
+                .foregroundStyle(palette.secondaryText)
+                .frame(maxWidth: 330)
+            HStack {
+                Button("Open in browser") { browser.openInDefaultBrowser() }
+                    .buttonStyle(.bordered)
+                Button("Retry here") { browser.reload() }
+                    .buttonStyle(.borderedProminent)
+            }
+        }
+        .padding(24)
+        .background {
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .fill(palette.drawer)
+                .shadow(color: .black.opacity(0.18), radius: 14, y: 5)
+        }
+        .overlay {
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .stroke(palette.border, lineWidth: 1)
+        }
+        .padding(24)
     }
 
     private var verificationNotice: some View {
@@ -563,8 +599,9 @@ private struct ObservedServicePane: View {
                 .foregroundStyle(palette.secondaryText)
                 .frame(maxWidth: 330)
             HStack {
-                Button("Retry here") { browser.reload() }
                 Button("Open in browser") { browser.openInDefaultBrowser() }
+                    .buttonStyle(.bordered)
+                Button("Retry here") { browser.reload() }
                     .buttonStyle(.borderedProminent)
             }
         }

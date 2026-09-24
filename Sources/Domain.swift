@@ -168,6 +168,11 @@ enum BrowserPhase: Equatable {
     case verificationRequired
     case failed(String)
 
+    var failureMessage: String? {
+        if case .failed(let message) = self { return message }
+        return nil
+    }
+
     var promptReadinessTimeout: TimeInterval {
         self == .ready ? 12 : 60
     }

@@ -16,6 +16,8 @@ struct CoreTests {
         expect(BrowserPhase.loading.promptReadinessTimeout > 12, "A cold provider must have time to finish loading before prompt dispatch gives up")
         expect(BrowserPhase.unloaded.promptReadinessTimeout == BrowserPhase.loading.promptReadinessTimeout, "An unloaded provider needs the same cold-load wait")
         expect(BrowserPhase.ready.promptReadinessTimeout == 12, "A loaded page with no composer should fail promptly")
+        expect(BrowserPhase.failed("The request timed out.").failureMessage == "The request timed out.", "A failed provider load must expose its error for the pane")
+        expect(BrowserPhase.loading.failureMessage == nil, "A loading provider must not show a failure")
         expect(ChatService.allCases.count == 2, "Expected exactly two services")
         expect(StartupDestination.allCases.count == 5, "Expected five startup destination choices")
         expect(StartupDestination.askEveryTime.title == "Ask Every Time", "Ask-every-time startup label changed")

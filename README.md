@@ -44,6 +44,6 @@ Reminder that you use this application at your own risk.
 
 ## License
 
-Duet is available under the **Duet License 1.0**. It permits personal and internal business use, as well as modification and free redistribution. You may not sell, monetize, commercially host, or provide Duet or derivative works as part of a paid product or service. Free distributions must retain the license and attribution, identify modifications, and use the same license. The software is provided without warranty.
+Duet is available under the **Duet License**. You may use it for personal or paid work, modify and build it for yourself or your organization, and fork the repository on GitHub as GitHub's Terms of Service allow. You may not sell Duet or derivative works, charge to host, install, or support them, or redistribute them outside the license's internal-use and GitHub-forking permissions. ChatGPT and Claude remain subject to their providers' terms. The software is provided without warranty.
 
 Read the complete [LICENSE.md](LICENSE.md) file in this repository. A copy is also included in every `Duet.zip` distribution.

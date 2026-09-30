@@ -19,6 +19,14 @@ menuLinks.addEventListener('click', (event) => {
   if (event.target.closest('a')) setMenuOpen(false);
 });
 
+document.addEventListener('click', (event) => {
+  if (!navigation.contains(event.target)) setMenuOpen(false);
+});
+
+navigation.addEventListener('focusout', (event) => {
+  if (!navigation.contains(event.relatedTarget)) setMenuOpen(false);
+});
+
 navigation.addEventListener('keydown', (event) => {
   if (event.key === 'Escape' && menuToggle.getAttribute('aria-expanded') === 'true') {
     setMenuOpen(false);

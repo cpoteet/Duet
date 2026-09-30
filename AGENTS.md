@@ -2,10 +2,11 @@
 
 ## Project boundaries
 
-Duet is a personal Apple Silicon macOS 15+ app for using ChatGPT and Claude in a compact native workspace. Read `PRODUCT.md` for product direction and `README.md` for user-facing installation and usage guidance.
+Duet is a personal Apple Silicon macOS 27+ app for using ChatGPT and Claude in a compact native workspace. Read `PRODUCT.md` for product direction and `README.md` for user-facing installation and usage guidance.
 
 - Keep the project independent of Xcode project files and Swift Package Manager.
 - Target `arm64-apple-macos15.0`.
+- State macOS 27 or later as the supported OS in the site and user-facing documentation; the compiler deployment target is a separate compatibility setting.
 - App Store distribution and Intel Mac support are out of scope. Releases use Developer ID signing and notarization.
 - Keep the user-facing app and bundle name as `Duet`. Preserve the existing internal bundle identifier so saved sessions and preferences survive renames.
 

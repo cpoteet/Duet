@@ -42,6 +42,14 @@ Reminder that you use this application at your own risk.
 7. From any app, press **Control–Option–Space** to open **Quick Prompt**. Choose **ChatGPT**, **Claude**, or **Both**; Duet brings its workspace forward and starts a fresh conversation with each selected provider. You can also open Quick Prompt from **Tools → Quick Prompt** while Duet is active.
 8. Read and continue each conversation inside its provider pane. Duet does not merge or scrape provider responses.
 
+## Website
+
+The public landing page lives in `site/`, with HTML in `index.html`, CSS in `styles.css`, JavaScript in `script.js`, and local images and fonts in `assets/`. It requires no build step or package dependencies.
+
+Preview it locally with `python3 -m http.server 8000 --directory site`, then open `http://localhost:8000`.
+
+The [site deployment workflow](.github/workflows/deploy-site.yml) publishes only `site/` to GitHub Pages when the site or workflow changes on `main`. It can also be run manually from GitHub Actions. This repository uses **GitHub Actions** as its Pages publishing source; for a fork, select that source in **Settings → Pages** before the first deployment. The site's address is `https://cpoteet.github.io/Duet/`.
+
 ## License
 
 Duet is available under the **Duet License**. You may use it for personal or paid work, modify and build it for yourself or your organization, and fork the repository on GitHub as GitHub's Terms of Service allow. You may not sell Duet or derivative works, charge to host, install, or support them, or redistribute them outside the license's internal-use and GitHub-forking permissions. ChatGPT and Claude remain subject to their providers' terms. The software is provided without warranty.

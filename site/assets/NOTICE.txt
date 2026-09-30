@@ -1,0 +1,8 @@
+The screenshot and Duet icon are from the supplied Duet Landing.html mockup
+and match Screenshots/split-view.png and Resources/DuetIcon.png in this repo.
+The icon is resized for use on the website. Duet assets use LICENSE.md.
+
+Geist and Geist Mono font files are extracted from the supplied mockup's
+Google Fonts assets. Copyright 2024 The Geist Project Authors
+(https://github.com/vercel/geist-font). Licensed under the SIL Open Font
+License, Version 1.1; see OFL.txt in this directory.

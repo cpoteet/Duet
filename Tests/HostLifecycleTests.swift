@@ -950,6 +950,24 @@ struct HostLifecycleTests {
                 service: .claude,
                 failures: &failures
             )
+            try await testComposerFixture(
+                named: "chatgpt-composer.html",
+                service: .chatGPT,
+                failures: &failures
+            )
+            for service in ChatService.allCases {
+                try await testComposerFixture(
+                    named: "hidden-composer.html",
+                    service: service,
+                    failures: &failures
+                )
+                try await testComposerFixture(
+                    named: "send-no-op.html",
+                    service: service,
+                    expectsConfirmation: false,
+                    failures: &failures
+                )
+            }
             try await testDelayedSend(failures: &failures)
             try await testRepeatedPromptConfirmation(failures: &failures)
             try await testExistingDraftProtection(failures: &failures)
@@ -1163,6 +1181,7 @@ struct HostLifecycleTests {
     private static func testComposerFixture(
         named name: String,
         service: ChatService,
+        expectsConfirmation: Bool = true,
         failures: inout [String]
     ) async throws {
         let (webView, loader) = makeFixtureWebView()
@@ -1177,31 +1196,69 @@ struct HostLifecycleTests {
         let ready: Bool = try await evaluate(adapter.readinessScript(), in: webView)
         expect(ready, "\(name) composer was not detected", failures: &failures)
 
-        let baselineMessageCount: Int = try await evaluate(adapter.submissionBaselineScript(), in: webView)
-
         let fill: ScriptResult = try await evaluate(adapter.fillScript(prompt: prompt), in: webView)
         expect(fill.ok, "\(name) composer was not filled", failures: &failures)
 
         let beforeClick: Bool = try await evaluate(
-            adapter.submissionConfirmationScript(
-                prompt: prompt,
-                baselineMessageCount: baselineMessageCount
-            ),
+            adapter.submissionConfirmationScript(prompt: prompt),
             in: webView
         )
         expect(!beforeClick, "\(name) reported submission before click", failures: &failures)
 
-        let submit: ScriptResult = try await evaluate(adapter.submissionScript(), in: webView)
+        let submit: ScriptResult = try await evaluate(adapter.submissionScript(prompt: prompt), in: webView)
         expect(submit.ok, "\(name) send control was not clicked", failures: &failures)
 
         let confirmed: Bool = try await evaluate(
-            adapter.submissionConfirmationScript(
-                prompt: prompt,
-                baselineMessageCount: baselineMessageCount
-            ),
+            adapter.submissionConfirmationScript(prompt: prompt),
             in: webView
         )
-        expect(confirmed, "\(name) submission was not confirmed", failures: &failures)
+        expect(
+            confirmed == expectsConfirmation,
+            "\(name) returned the wrong submission confirmation",
+            failures: &failures
+        )
+
+        if name == "chatgpt-composer.html" {
+            _ = try await evaluate(
+                "(() => { document.querySelector('#prompt-textarea').remove(); return true; })()",
+                in: webView
+            ) as Bool
+            let missingComposer: Bool = try await evaluate(
+                adapter.submissionConfirmationScript(prompt: prompt),
+                in: webView
+            )
+            expect(!missingComposer, "A missing composer must not confirm during navigation", failures: &failures)
+
+            _ = try await evaluate(
+                """
+                (() => {
+                  const composer = document.createElement('div');
+                  composer.id = 'prompt-textarea';
+                  composer.contentEditable = 'true';
+                  composer.textContent = 'Ask anything';
+                  composer.setAttribute('aria-hidden', 'true');
+                  document.body.appendChild(composer);
+                  return true;
+                })()
+                """,
+                in: webView
+            ) as Bool
+            let hiddenComposer: Bool = try await evaluate(
+                adapter.submissionConfirmationScript(prompt: prompt),
+                in: webView
+            )
+            expect(!hiddenComposer, "A hidden composer must not confirm submission", failures: &failures)
+
+            _ = try await evaluate(
+                "(() => { document.querySelector('#prompt-textarea').removeAttribute('aria-hidden'); return true; })()",
+                in: webView
+            ) as Bool
+            let replacementComposer: Bool = try await evaluate(
+                adapter.submissionConfirmationScript(prompt: prompt),
+                in: webView
+            )
+            expect(replacementComposer, "A visible replacement composer with placeholder text should confirm", failures: &failures)
+        }
     }
 
     @MainActor
@@ -1215,20 +1272,16 @@ struct HostLifecycleTests {
 
         let adapter = ProviderAdapter.adapter(for: .claude)
         let prompt = "Delayed prompt"
-        let baselineMessageCount: Int = try await evaluate(adapter.submissionBaselineScript(), in: webView)
         _ = try await evaluate(adapter.fillScript(prompt: prompt), in: webView) as ScriptResult
 
-        let early: ScriptResult = try await evaluate(adapter.submissionScript(), in: webView)
+        let early: ScriptResult = try await evaluate(adapter.submissionScript(prompt: prompt), in: webView)
         expect(!early.ok, "Delayed send control was available too early", failures: &failures)
         try await Task.sleep(for: .milliseconds(350))
 
-        let submit: ScriptResult = try await evaluate(adapter.submissionScript(), in: webView)
+        let submit: ScriptResult = try await evaluate(adapter.submissionScript(prompt: prompt), in: webView)
         expect(submit.ok, "Delayed send control never became ready", failures: &failures)
         let confirmed: Bool = try await evaluate(
-            adapter.submissionConfirmationScript(
-                prompt: prompt,
-                baselineMessageCount: baselineMessageCount
-            ),
+            adapter.submissionConfirmationScript(prompt: prompt),
             in: webView
         )
         expect(confirmed, "Delayed submission was not confirmed", failures: &failures)
@@ -1248,56 +1301,40 @@ struct HostLifecycleTests {
         _ = try await evaluate(
             """
             (() => {
-              const message = document.createElement('div');
-              message.dataset.messageAuthorRole = 'user';
-              message.textContent = "Repeated prompt";
-              document.body.appendChild(message);
+              window.sendClicks = 0;
+              document.querySelector('button').addEventListener('click', () => window.sendClicks++);
               return true;
             })()
             """,
             in: webView
         ) as Bool
-        let baselineMessageCount: Int = try await evaluate(adapter.submissionBaselineScript(), in: webView)
         _ = try await evaluate(adapter.fillScript(prompt: prompt), in: webView) as ScriptResult
-
-        let oldMessageConfirmed: Bool = try await evaluate(
-            adapter.submissionConfirmationScript(
-                prompt: prompt,
-                baselineMessageCount: baselineMessageCount
-            ),
-            in: webView
-        )
-        expect(!oldMessageConfirmed, "An older repeated prompt must not confirm a new submission", failures: &failures)
-
         _ = try await evaluate(
-            """
-            (() => {
-              document.querySelector('textarea').value = '';
-              return true;
-            })()
-            """,
+            "(() => { document.querySelector('textarea').value = ''; return true; })()",
             in: webView
         ) as Bool
-        let clearedComposerConfirmed: Bool = try await evaluate(
-            adapter.submissionConfirmationScript(
-                prompt: prompt,
-                baselineMessageCount: baselineMessageCount
-            ),
-            in: webView
-        )
-        expect(!clearedComposerConfirmed, "An empty composer alone must not confirm submission", failures: &failures)
+
+        let refused: ScriptResult = try await evaluate(adapter.submissionScript(prompt: prompt), in: webView)
+        expect(!refused.ok, "A composer cleared before Duet's click must block submission", failures: &failures)
+        expect(refused.reason == "composer-missing-prompt", "A cleared composer should report the missing prompt", failures: &failures)
+        let clicksBeforeFill: Int = try await evaluate("window.sendClicks", in: webView)
+        expect(clicksBeforeFill == 0, "A cleared composer must not click Send", failures: &failures)
 
         _ = try await evaluate(adapter.fillScript(prompt: prompt), in: webView) as ScriptResult
-        let submit: ScriptResult = try await evaluate(adapter.submissionScript(), in: webView)
-        expect(submit.ok, "Repeated prompt send control was not clicked", failures: &failures)
-        let newMessageConfirmed: Bool = try await evaluate(
-            adapter.submissionConfirmationScript(
-                prompt: prompt,
-                baselineMessageCount: baselineMessageCount
-            ),
+        let beforeClick: Bool = try await evaluate(
+            adapter.submissionConfirmationScript(prompt: prompt),
             in: webView
         )
-        expect(newMessageConfirmed, "A newly added repeated prompt should confirm submission", failures: &failures)
+        expect(!beforeClick, "Refilling a repeated prompt must not confirm before the click", failures: &failures)
+        let submit: ScriptResult = try await evaluate(adapter.submissionScript(prompt: prompt), in: webView)
+        expect(submit.ok, "Repeated prompt send control was not clicked", failures: &failures)
+        let confirmed: Bool = try await evaluate(
+            adapter.submissionConfirmationScript(prompt: prompt),
+            in: webView
+        )
+        expect(confirmed, "A filled and clicked repeated prompt should confirm submission", failures: &failures)
+        let clicksAfterFill: Int = try await evaluate("window.sendClicks", in: webView)
+        expect(clicksAfterFill == 1, "A filled prompt should click Send once", failures: &failures)
     }
 
     @MainActor

@@ -81,9 +81,8 @@ struct CoreTests {
             let adapter = ProviderAdapter.adapter(for: service)
             let readiness = adapter.readinessScript()
             let fill = adapter.fillScript(prompt: "A quote: \\\" and a newline\\nnext line")
-            let submit = adapter.submissionScript()
-            let baseline = adapter.submissionBaselineScript()
-            let confirmation = adapter.submissionConfirmationScript(prompt: "test", baselineMessageCount: 0)
+            let submit = adapter.submissionScript(prompt: "test")
+            let confirmation = adapter.submissionConfirmationScript(prompt: "test")
             let fileDropCompatibility = adapter.fileDropCompatibilityScript()
             expect(readiness.contains("document.querySelector"), "\(service.title) readiness script has no selector")
             expect(readiness.contains("getClientRects"), "\(service.title) readiness script accepts a hidden composer")
@@ -91,8 +90,9 @@ struct CoreTests {
             expect(fill.contains("composer-not-empty"), "\(service.title) fill script does not protect provider drafts")
             expect(!fill.contains("sendButton.click()"), "\(service.title) fill script must not submit early")
             expect(submit.contains("sendButton.click()"), "\(service.title) submission script does not execute")
-            expect(baseline.contains("userMessageSelectors"), "\(service.title) submission baseline has no provider evidence")
-            expect(confirmation.contains("userMessageSelectors"), "\(service.title) confirmation script has no provider evidence")
+            expect(submit.contains("composer-missing-prompt"), "\(service.title) submission must check the composer before clicking")
+            expect(confirmation.contains("composerSelectors"), "\(service.title) confirmation must find the current composer")
+            expect(confirmation.contains("getClientRects"), "\(service.title) confirmation must require a visible composer")
             expect(fill.contains("A quote:"), "\(service.title) prompt was not encoded")
             if service == .claude {
                 expect(

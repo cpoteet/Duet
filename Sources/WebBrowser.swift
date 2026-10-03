@@ -141,7 +141,6 @@ final class BrowserController: NSObject, ObservableObject {
             guard service.allowsPromptInjection(at: webView?.url) else {
                 return .failed("Provider page is not active")
             }
-            let baselineMessageCount = try await evaluate(adapter.submissionBaselineScript(), as: Int.self)
             let result = try await evaluate(adapter.fillScript(prompt: prompt), as: ScriptResult.self)
             guard result.ok else {
                 if result.reason == "composer-not-found" {
@@ -154,7 +153,6 @@ final class BrowserController: NSObject, ObservableObject {
             }
             return await waitForSubmission(
                 prompt: prompt,
-                baselineMessageCount: baselineMessageCount,
                 timeout: 4
             )
         } catch {
@@ -380,7 +378,6 @@ final class BrowserController: NSObject, ObservableObject {
 
     private func waitForSubmission(
         prompt: String,
-        baselineMessageCount: Int,
         timeout: TimeInterval
     ) async -> PromptDispatchOutcome {
         let deadline = Date().addingTimeInterval(timeout)
@@ -393,16 +390,13 @@ final class BrowserController: NSObject, ObservableObject {
                 }
                 if didClickSend {
                     if try await evaluate(
-                        adapter.submissionConfirmationScript(
-                            prompt: prompt,
-                            baselineMessageCount: baselineMessageCount
-                        ),
+                        adapter.submissionConfirmationScript(prompt: prompt),
                         as: Bool.self
                     ) {
                         return .sent
                     }
                 } else {
-                    let result = try await evaluate(adapter.submissionScript(), as: ScriptResult.self)
+                    let result = try await evaluate(adapter.submissionScript(prompt: prompt), as: ScriptResult.self)
                     didClickSend = result.ok
                 }
             } catch {

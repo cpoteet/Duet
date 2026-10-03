@@ -28,7 +28,7 @@ Duet is a personal Apple Silicon macOS 27+ app for using ChatGPT and Claude in a
 - Quick Prompt is available globally with Control–Option–Space and from Tools → Quick Prompt. It sends to ChatGPT, Claude, or Both, always starts a fresh conversation for each selected provider, and brings the workspace forward for continued interaction.
 - Keep the primary workspace in its `WindowGroup` so Quick Prompt can reopen it after the window closes. Identify the workspace with its stable `NSWindow.identifier`; do not locate it by title or fall back to unrelated windows.
 - The shared native prompt drawer is text-only, collapsed by default, stays open until explicitly closed, and provides Send to Current and Send to Both.
-- Sending fills each provider's composer, waits for its reactive send control, then invokes it. Show independent provider statuses and never auto-retry an ambiguous submission.
+- Sending fills each provider's composer, waits for its reactive send control, invokes it, and confirms the submission when the composer clears. Do not confirm by reading provider message markup. Show independent provider statuses and never auto-retry an ambiguous submission.
 - Keep response viewing, history, attachments, and provider-specific features in the provider pages. Do not scrape or merge provider responses.
 - Support provider-managed sign-in, passkeys, and 2FA. Open provider-created popup windows in the default browser rather than managing custom popup windows inside Duet. Never collect or store user credentials.
 - Grant microphone capture only to active HTTPS ChatGPT and Claude provider frames after macOS authorization. Preserve camera prompts, and deny authentication, third-party, foreign, stale, spoofed, and non-HTTPS contexts.

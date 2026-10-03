@@ -3,7 +3,6 @@ import Foundation
 struct ProviderAdapter {
     let composerSelectors: [String]
     let sendButtonSelectors: [String]
-    let userMessageSelectors: [String]
     /// Elements present only while the provider is generating a response.
     let generationIndicatorSelectors: [String]
     /// A provider-owned file input used to bridge WebKit file drops through
@@ -27,9 +26,6 @@ struct ProviderAdapter {
                     "button[aria-label*='Send']",
                     "button[type='submit']"
                 ],
-                userMessageSelectors: [
-                    "[data-message-author-role='user']"
-                ],
                 generationIndicatorSelectors: [
                     "button[data-testid='stop-button']",
                     "button[aria-label='Stop streaming']",
@@ -50,10 +46,6 @@ struct ProviderAdapter {
                     "button[aria-label*='Send']",
                     "button[data-testid*='send']",
                     "button[type='submit']"
-                ],
-                userMessageSelectors: [
-                    "[data-testid='user-message']",
-                    "[data-is-streaming='false'] .font-user-message"
                 ],
                 generationIndicatorSelectors: [
                     "[data-is-streaming='true']",
@@ -126,7 +118,7 @@ struct ProviderAdapter {
         (() => {
           const composerSelectors = \(jsonArray(composerSelectors));
           const isVisible = element => element && element.getClientRects().length > 0 && !element.closest('[aria-hidden="true"]');
-          return composerSelectors.map(selector => document.querySelector(selector)).some(isVisible);
+          return composerSelectors.flatMap(selector => Array.from(document.querySelectorAll(selector))).some(isVisible);
         })()
         """
     }
@@ -151,8 +143,6 @@ struct ProviderAdapter {
         """
     }
 
-    /// Fill first, then let the native app wait for the site's reactive UI to
-    /// enable and render its send button before calling `submissionScript()`.
     func fillScript(prompt: String) -> String {
         let encodedPrompt = jsonString(prompt)
         return """
@@ -160,7 +150,7 @@ struct ProviderAdapter {
           const prompt = \(encodedPrompt);
           const composerSelectors = \(jsonArray(composerSelectors));
           const isVisible = element => element && element.getClientRects().length > 0 && !element.closest('[aria-hidden="true"]');
-          const composer = composerSelectors.map(selector => document.querySelector(selector)).find(isVisible);
+          const composer = composerSelectors.flatMap(selector => Array.from(document.querySelectorAll(selector))).find(isVisible);
           if (!composer) return { ok: false, reason: 'composer-not-found' };
 
           const existingText = composer instanceof HTMLTextAreaElement || composer instanceof HTMLInputElement
@@ -196,11 +186,21 @@ struct ProviderAdapter {
         """
     }
 
-    func submissionScript() -> String {
-        """
+    func submissionScript(prompt: String) -> String {
+        let encodedPrompt = jsonString(prompt)
+        return """
         (() => {
+          const normalize = text => text.replace(/\\s+/g, ' ').trim();
+          const prompt = normalize(\(encodedPrompt));
+          const composerSelectors = \(jsonArray(composerSelectors));
           const sendButtonSelectors = \(jsonArray(sendButtonSelectors));
           const isVisible = element => element && element.getClientRects().length > 0 && !element.closest('[aria-hidden="true"]');
+          const composer = composerSelectors.flatMap(selector => Array.from(document.querySelectorAll(selector))).find(isVisible);
+          if (!composer) return { ok: false, reason: 'composer-missing-prompt' };
+          const text = composer instanceof HTMLTextAreaElement || composer instanceof HTMLInputElement
+            ? composer.value
+            : composer.innerText || composer.textContent || '';
+          if (!normalize(text).includes(prompt)) return { ok: false, reason: 'composer-missing-prompt' };
           const buttons = sendButtonSelectors.flatMap(selector => Array.from(document.querySelectorAll(selector)));
           const sendButton = buttons.find(button =>
             isVisible(button) && !button.disabled && button.getAttribute('aria-disabled') !== 'true'
@@ -212,28 +212,20 @@ struct ProviderAdapter {
         """
     }
 
-    func submissionBaselineScript() -> String {
-        """
-        (() => {
-          const userMessageSelectors = \(jsonArray(userMessageSelectors));
-          return userMessageSelectors.flatMap(selector => Array.from(document.querySelectorAll(selector))).length;
-        })()
-        """
-    }
-
-    func submissionConfirmationScript(prompt: String, baselineMessageCount: Int) -> String {
+    func submissionConfirmationScript(prompt: String) -> String {
         let encodedPrompt = jsonString(prompt)
         return """
         (() => {
           const normalize = text => text.replace(/\\s+/g, ' ').trim();
           const prompt = normalize(\(encodedPrompt));
-          const userMessageSelectors = \(jsonArray(userMessageSelectors));
-          const messages = userMessageSelectors.flatMap(selector => Array.from(document.querySelectorAll(selector)));
-          if (messages.length <= \(baselineMessageCount)) return false;
-          return messages.slice(\(baselineMessageCount)).some(message => {
-            const text = normalize(message.innerText || message.textContent || '');
-            return text === prompt || text.includes(prompt);
-          });
+          const composerSelectors = \(jsonArray(composerSelectors));
+          const isVisible = element => element && element.getClientRects().length > 0 && !element.closest('[aria-hidden="true"]');
+          const composer = composerSelectors.flatMap(selector => Array.from(document.querySelectorAll(selector))).find(isVisible);
+          if (!composer) return false;
+          const text = composer instanceof HTMLTextAreaElement || composer instanceof HTMLInputElement
+            ? composer.value
+            : composer.innerText || composer.textContent || '';
+          return !normalize(text).includes(prompt);
         })()
         """
     }

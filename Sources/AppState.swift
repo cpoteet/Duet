@@ -10,6 +10,7 @@ struct PromptDraftSnapshot {
 final class AppState: ObservableObject {
     @Published var selectedService: ChatService = .chatGPT
     @Published var isSplitView = false
+    @Published var isPromptDrawerOpen = false
     @Published private(set) var isLaunchChooserVisible = true
     @Published var prompt = "" {
         didSet { promptRevision &+= 1 }
@@ -48,6 +49,7 @@ final class AppState: ObservableObject {
             _ = browser(for: service).prepare()
         case .both:
             isSplitView = true
+            isPromptDrawerOpen = true
             isLaunchChooserVisible = false
             ChatService.allCases.forEach { _ = browser(for: $0).prepare() }
         case .current, .none:
@@ -96,6 +98,7 @@ final class AppState: ObservableObject {
             inactiveBrowserReleaseTask?.cancel()
             inactiveBrowserReleaseTask = nil
             if !wasSplitView {
+                isPromptDrawerOpen = true
                 mountedBrowserServices.removeAll()
             }
             ChatService.allCases.forEach { _ = browser(for: $0).prepare() }
@@ -185,6 +188,7 @@ final class AppState: ObservableObject {
     func clearPrompt(ifUnchanged draft: PromptDraftSnapshot) {
         guard promptRevision == draft.revision, prompt == draft.text else { return }
         prompt = ""
+        isPromptDrawerOpen = false
     }
 
     func send(draft: PromptDraftSnapshot, to target: PromptTarget) async -> [PromptDispatchResult] {

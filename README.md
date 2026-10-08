@@ -38,7 +38,7 @@ Reminder that you use this application at your own risk.
 3. When you first use provider dictation or audio chat, allow Duet to access the microphone in the macOS permission prompt. The same applies to requests for your location.
 4. Use the workspace picker in the toolbar to show **ChatGPT**, **Claude**, or **Both**. The **Layout** menu also switches between single and split view.
 5. For faster switching at the cost of additional memory, open **Duet → Settings** and enable **Keep both providers loaded**.
-6. Open **Prompt** in the toolbar, or press **Command–Shift–P**, when you want to enter a text-only prompt. Send it to the active provider or choose **Send to Both** to submit the same prompt to ChatGPT and Claude. Close the drawer when you are finished.
+6. Open **Prompt** in the toolbar, or press **Command–Shift–P**, when you want to enter a text-only prompt. Send it to the active provider or choose **Send to Both** to submit the same prompt to ChatGPT and Claude. The drawer opens automatically when you enter split view. After every selected provider confirms submission, the draft clears and the drawer collapses.
 7. From any app, press **Control–Option–Space** to open **Quick Prompt**. Choose **ChatGPT**, **Claude**, or **Both**; Duet brings its workspace forward and starts a fresh conversation with each selected provider. You can also open Quick Prompt from **Tools → Quick Prompt** while Duet is active.
 8. Read and continue each conversation inside its provider pane. Duet does not merge or scrape provider responses.
 

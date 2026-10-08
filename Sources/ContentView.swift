@@ -3,7 +3,6 @@ import SwiftUI
 
 struct ContentView: View {
     @ObservedObject var appState: AppState
-    @State private var isComposerOpen = false
     @State private var isPreparingPromptDispatch = false
     @AppStorage("splitViewRatio") private var splitViewRatio = 0.5
     @AppStorage(AppPreferenceKey.keepProvidersLoaded) private var keepProvidersLoaded = false
@@ -27,7 +26,7 @@ struct ContentView: View {
                 launchChooser
             } else {
                 browserAreaWithToast
-                if isComposerOpen {
+                if appState.isPromptDrawerOpen {
                     promptDrawer
                 }
             }
@@ -43,14 +42,14 @@ struct ContentView: View {
                 }
                 ToolbarItemGroup(placement: .primaryAction) {
                     Button {
-                        isComposerOpen.toggle()
+                        appState.isPromptDrawerOpen.toggle()
                     } label: {
                         Label("Prompt", systemImage: "paperplane")
                             .padding(.horizontal, 6)
                     }
                     .labelStyle(.titleAndIcon)
                     .keyboardShortcut("p", modifiers: [.command, .shift])
-                    .help(isComposerOpen ? "Close shared prompt" : "Open shared prompt")
+                    .help(appState.isPromptDrawerOpen ? "Close shared prompt" : "Open shared prompt")
 
                     layoutMenu
                 }
@@ -62,7 +61,6 @@ struct ContentView: View {
             await appState.checkForUpdateIfNeeded()
         }
         .onAppear {
-            isComposerOpen = false
             appState.setKeepsProvidersLoaded(keepProvidersLoaded)
             presentPendingDispatchNotice()
         }
@@ -179,7 +177,7 @@ struct ContentView: View {
     }
 
     private func beginSession(with destination: LaunchDestination) {
-        isComposerOpen = false
+        appState.isPromptDrawerOpen = false
         appState.openWorkspace(for: destination.promptTarget)
     }
 
@@ -333,7 +331,7 @@ struct ContentView: View {
                     .font(.headline)
                 Spacer()
                 Button {
-                    isComposerOpen = false
+                    appState.isPromptDrawerOpen = false
                 } label: {
                     Label("Close", systemImage: "xmark")
                         .font(.system(size: 13, weight: .semibold))

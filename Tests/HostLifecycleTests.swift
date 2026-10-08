@@ -732,6 +732,7 @@ struct HostLifecycleTests {
         expect(!claudeStartupState.isLaunchChooserVisible, "Claude startup should skip the tool chooser")
         expect(claudeStartupState.selectedService == .claude, "Claude startup should select Claude")
         expect(!claudeStartupState.isSplitView, "Claude startup should use one pane")
+        expect(!claudeStartupState.isPromptDrawerOpen, "Single-provider startup should keep the prompt drawer collapsed")
         expect(
             claudeStartupState.browser(for: .claude).webView != nil
                 && claudeStartupState.browser(for: .chatGPT).webView == nil,
@@ -741,6 +742,7 @@ struct HostLifecycleTests {
         let bothStartupState = AppState(startupDestination: .both, userDefaults: startupDefaults)
         expect(!bothStartupState.isLaunchChooserVisible, "Both startup should skip the tool chooser")
         expect(bothStartupState.isSplitView, "Both startup should use split view")
+        expect(bothStartupState.isPromptDrawerOpen, "Both startup should immediately open the prompt drawer")
         expect(
             ChatService.allCases.allSatisfy { bothStartupState.browser(for: $0).webView != nil },
             "Both startup should prepare both providers"
@@ -768,6 +770,13 @@ struct HostLifecycleTests {
             providersWerePreparedBeforeSplitPublished,
             "Both provider views must exist before split state is published to SwiftUI"
         )
+        expect(splitPreparationState.isPromptDrawerOpen, "Entering split view should open the prompt drawer")
+        splitPreparationState.isPromptDrawerOpen = false
+        splitPreparationState.setSplitView(true)
+        expect(!splitPreparationState.isPromptDrawerOpen, "Remaining in split view should preserve a collapsed drawer")
+        splitPreparationState.setSplitView(false)
+        splitPreparationState.setSplitView(true)
+        expect(splitPreparationState.isPromptDrawerOpen, "Reentering split view should reopen the prompt drawer")
         withExtendedLifetime(splitStateObserver) {}
 
         let workspaceState = AppState(userDefaults: startupDefaults)
@@ -798,6 +807,7 @@ struct HostLifecycleTests {
         )
         workspaceState.openWorkspace(for: .both)
         expect(workspaceState.isSplitView, "Both destination should use split view")
+        expect(workspaceState.isPromptDrawerOpen, "Choosing Both should immediately open the prompt drawer")
         expect(
             startupDefaults.string(forKey: AppPreferenceKey.lastWorkspaceDestination) == StartupDestination.both.rawValue,
             "Opening Both should remember split view as the last workspace destination"
@@ -824,16 +834,19 @@ struct HostLifecycleTests {
         )
 
         let promptDrawerState = AppState()
+        promptDrawerState.isPromptDrawerOpen = true
         promptDrawerState.prompt = "First prompt"
         let submittedDraft = promptDrawerState.capturePromptDraft()
         promptDrawerState.prompt = "Second unsent draft"
         promptDrawerState.clearPrompt(ifUnchanged: submittedDraft)
         expect(promptDrawerState.prompt == "Second unsent draft", "A successful earlier send must preserve a newer draft")
+        expect(promptDrawerState.isPromptDrawerOpen, "An earlier send must leave a newer draft visible")
         promptDrawerState.prompt = "First prompt"
         promptDrawerState.clearPrompt(ifUnchanged: submittedDraft)
         expect(promptDrawerState.prompt == "First prompt", "Returning to identical text must still count as a newer edit")
         promptDrawerState.clearPrompt(ifUnchanged: promptDrawerState.capturePromptDraft())
         expect(promptDrawerState.prompt.isEmpty, "An unchanged submitted draft should clear after success")
+        expect(!promptDrawerState.isPromptDrawerOpen, "An unchanged submitted draft should collapse the drawer after success")
         promptDrawerState.openWorkspace(for: .service(.chatGPT))
         promptDrawerState.browserDidMount(.chatGPT)
         var promptDrawerPreparationCompleted = false

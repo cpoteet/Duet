@@ -944,6 +944,40 @@ struct HostLifecycleTests {
         )
         expect(singleWorkspaceMounted, "Claude must mount before a single-provider Quick Prompt dispatch")
 
+        let quickPromptDrawerState = AppState()
+        let emptyDrawerDraft = quickPromptDrawerState.capturePromptDraft()
+        quickPromptDrawerState.openQuickPromptWorkspace(for: .both)
+        expect(quickPromptDrawerState.isPromptDrawerOpen, "Quick Prompt Both should initially open the shared drawer")
+        let successfulQuickPromptResults = ChatService.allCases.map {
+            PromptDispatchResult(service: $0, outcome: .sent)
+        }
+        let partialQuickPromptResults = [
+            PromptDispatchResult(service: .chatGPT, outcome: .sent),
+            PromptDispatchResult(service: .claude, outcome: .failed("Could not confirm prompt was sent"))
+        ]
+        quickPromptDrawerState.collapseEmptyPromptDrawer(after: [], ifUnchanged: emptyDrawerDraft)
+        expect(quickPromptDrawerState.isPromptDrawerOpen, "No Quick Prompt results must not collapse the shared drawer")
+        quickPromptDrawerState.collapseEmptyPromptDrawer(after: partialQuickPromptResults, ifUnchanged: emptyDrawerDraft)
+        expect(quickPromptDrawerState.isPromptDrawerOpen, "An unconfirmed Quick Prompt provider must keep the shared drawer open")
+        quickPromptDrawerState.collapseEmptyPromptDrawer(after: successfulQuickPromptResults, ifUnchanged: emptyDrawerDraft)
+        expect(!quickPromptDrawerState.isPromptDrawerOpen, "Successful Quick Prompt Both should collapse the unchanged empty drawer")
+
+        quickPromptDrawerState.isPromptDrawerOpen = true
+        quickPromptDrawerState.prompt = "Existing shared draft"
+        let existingDrawerDraft = quickPromptDrawerState.capturePromptDraft()
+        quickPromptDrawerState.collapseEmptyPromptDrawer(after: successfulQuickPromptResults, ifUnchanged: existingDrawerDraft)
+        expect(quickPromptDrawerState.isPromptDrawerOpen, "Quick Prompt must leave an existing shared draft visible")
+        expect(quickPromptDrawerState.prompt == "Existing shared draft", "Quick Prompt must preserve an existing shared draft")
+        quickPromptDrawerState.prompt = ""
+        let unchangedEmptyDrawerDraft = quickPromptDrawerState.capturePromptDraft()
+        quickPromptDrawerState.prompt = "New shared draft"
+        quickPromptDrawerState.collapseEmptyPromptDrawer(after: successfulQuickPromptResults, ifUnchanged: unchangedEmptyDrawerDraft)
+        expect(quickPromptDrawerState.isPromptDrawerOpen, "Quick Prompt must leave a newer shared draft visible")
+        expect(quickPromptDrawerState.prompt == "New shared draft", "Quick Prompt must preserve a newer shared draft")
+        quickPromptDrawerState.prompt = ""
+        quickPromptDrawerState.collapseEmptyPromptDrawer(after: successfulQuickPromptResults, ifUnchanged: unchangedEmptyDrawerDraft)
+        expect(quickPromptDrawerState.isPromptDrawerOpen, "An edited drawer returning to empty must still count as a newer edit")
+
         singleQuickPromptState.reportQuickPromptWorkspaceUnavailable(for: .service(.claude))
         expect(
             singleQuickPromptState.dispatchNotice?.results == [
@@ -1270,7 +1304,7 @@ struct HostLifecycleTests {
                 adapter.submissionConfirmationScript(prompt: prompt),
                 in: webView
             )
-            expect(replacementComposer, "A visible replacement composer with placeholder text should confirm", failures: &failures)
+            expect(!replacementComposer, "A visible replacement composer containing text must not confirm", failures: &failures)
         }
     }
 
@@ -1333,6 +1367,25 @@ struct HostLifecycleTests {
         let clicksBeforeFill: Int = try await evaluate("window.sendClicks", in: webView)
         expect(clicksBeforeFill == 0, "A cleared composer must not click Send", failures: &failures)
 
+        _ = try await evaluate(adapter.fillScript(prompt: prompt), in: webView) as ScriptResult
+        _ = try await evaluate(
+            "(() => { document.querySelector('textarea').value += ' edited'; return true; })()",
+            in: webView
+        ) as Bool
+        let editedSubmission: ScriptResult = try await evaluate(adapter.submissionScript(prompt: prompt), in: webView)
+        expect(!editedSubmission.ok, "An edited composer must not submit a changed prompt", failures: &failures)
+        let clicksAfterEdit: Int = try await evaluate("window.sendClicks", in: webView)
+        expect(clicksAfterEdit == 0, "An edited composer must not click Send", failures: &failures)
+        _ = try await evaluate(
+            "(() => { document.querySelector('textarea').value = 'Different draft'; return true; })()",
+            in: webView
+        ) as Bool
+        let editedConfirmation: Bool = try await evaluate(adapter.submissionConfirmationScript(prompt: prompt), in: webView)
+        expect(!editedConfirmation, "A different composer draft must not confirm submission", failures: &failures)
+        _ = try await evaluate(
+            "(() => { document.querySelector('textarea').value = ''; return true; })()",
+            in: webView
+        ) as Bool
         _ = try await evaluate(adapter.fillScript(prompt: prompt), in: webView) as ScriptResult
         let beforeClick: Bool = try await evaluate(
             adapter.submissionConfirmationScript(prompt: prompt),

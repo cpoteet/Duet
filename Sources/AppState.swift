@@ -191,6 +191,15 @@ final class AppState: ObservableObject {
         isPromptDrawerOpen = false
     }
 
+    func collapseEmptyPromptDrawer(
+        after results: [PromptDispatchResult],
+        ifUnchanged draft: PromptDraftSnapshot
+    ) {
+        guard !results.isEmpty, results.allSatisfy(\.wasSent),
+              draft.text.isEmpty, promptRevision == draft.revision, prompt == draft.text else { return }
+        isPromptDrawerOpen = false
+    }
+
     func send(draft: PromptDraftSnapshot, to target: PromptTarget) async -> [PromptDispatchResult] {
         let results = await send(prompt: draft.text, to: target)
         if !results.isEmpty && results.allSatisfy(\.wasSent) {

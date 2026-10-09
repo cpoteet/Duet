@@ -202,6 +202,7 @@ private struct QuickPromptView: View {
         let submittedRevision = promptRevision
         guard !text.isEmpty else { return }
 
+        let drawerDraft = appState.capturePromptDraft()
         guard appState.openQuickPromptWorkspace(for: target.promptTarget) else { return }
         dismiss()
         revealWorkspace()
@@ -216,6 +217,7 @@ private struct QuickPromptView: View {
                 to: target.promptTarget,
                 startingNewConversations: true
             )
+            appState.collapseEmptyPromptDrawer(after: results, ifUnchanged: drawerDraft)
             if !results.isEmpty && results.allSatisfy(\.wasSent), promptRevision == submittedRevision {
                 prompt = ""
             }

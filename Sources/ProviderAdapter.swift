@@ -200,7 +200,7 @@ struct ProviderAdapter {
           const text = composer instanceof HTMLTextAreaElement || composer instanceof HTMLInputElement
             ? composer.value
             : composer.innerText || composer.textContent || '';
-          if (!normalize(text).includes(prompt)) return { ok: false, reason: 'composer-missing-prompt' };
+          if (normalize(text) !== prompt) return { ok: false, reason: 'composer-missing-prompt' };
           const buttons = sendButtonSelectors.flatMap(selector => Array.from(document.querySelectorAll(selector)));
           const sendButton = buttons.find(button =>
             isVisible(button) && !button.disabled && button.getAttribute('aria-disabled') !== 'true'
@@ -225,7 +225,7 @@ struct ProviderAdapter {
           const text = composer instanceof HTMLTextAreaElement || composer instanceof HTMLInputElement
             ? composer.value
             : composer.innerText || composer.textContent || '';
-          return !normalize(text).includes(prompt);
+          return prompt.length > 0 && normalize(text).length === 0;
         })()
         """
     }

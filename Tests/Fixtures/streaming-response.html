@@ -3,14 +3,22 @@
 <head><meta charset="utf-8"><title>Streaming response fixture</title></head>
 <body>
 <div id="message" data-is-streaming="true">Streaming…</div>
+<div id="controls"><button aria-label="Stop">Stop</button></div>
 <script>
-setTimeout(() => {
-  document.getElementById("message").setAttribute("data-is-streaming", "false");
-}, 400);
+const setStreaming = streaming => {
+  document.getElementById("message").setAttribute("data-is-streaming", String(streaming));
+  document.getElementById("controls").replaceChildren();
+  if (streaming) {
+    const button = document.createElement("button");
+    button.setAttribute("aria-label", "Stop");
+    button.textContent = "Stop";
+    document.getElementById("controls").appendChild(button);
+  }
+};
+setTimeout(() => setStreaming(false), 400);
 window.flickerStreaming = milliseconds => {
-  const message = document.getElementById("message");
-  message.setAttribute("data-is-streaming", "true");
-  setTimeout(() => message.setAttribute("data-is-streaming", "false"), milliseconds);
+  setStreaming(true);
+  setTimeout(() => setStreaming(false), milliseconds);
 };
 </script>
 </body>

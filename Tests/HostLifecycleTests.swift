@@ -1854,16 +1854,23 @@ struct HostLifecycleTests {
 
     @MainActor
     private static func testResponseWatcherFixture(failures: inout [String]) async throws {
+        for service in ChatService.allCases {
+            try await testResponseWatcherFixture(for: service, failures: &failures)
+        }
+    }
+
+    @MainActor
+    private static func testResponseWatcherFixture(for service: ChatService, failures: inout [String]) async throws {
         let fixtureHTML = try String(contentsOf: fixtureURL("streaming-response.html"), encoding: .utf8)
         let presenter = RecordingNotificationPresenter(initial: .granted, afterRequest: .granted)
 
         let configuration = WKWebViewConfiguration()
         configuration.preferences.inactiveSchedulingPolicy = .none
-        let bridge = NotificationBridge(service: .claude, presenter: presenter)
+        let bridge = NotificationBridge(service: service, presenter: presenter)
         let watcher = WKUserScript(
             source: NotificationScript.responseWatcherSource(
-                indicatorSelectors: ProviderAdapter.adapter(for: .claude).generationIndicatorSelectors,
-                allowedHosts: ChatService.claude.webNotificationHosts,
+                indicatorSelectors: ProviderAdapter.adapter(for: service).generationIndicatorSelectors,
+                allowedHosts: service.webNotificationHosts,
                 pollIntervalMilliseconds: 50,
                 minimumGenerationMilliseconds: 200
             ),
@@ -1885,24 +1892,23 @@ struct HostLifecycleTests {
             webView.navigationDelegate = nil
             webView.stopLoading()
         }
-        try await loader.loadHTML(fixtureHTML, baseURL: URL(string: "https://claude.ai")!, in: webView)
+        try await loader.loadHTML(fixtureHTML, baseURL: service.startURL, in: webView)
 
         let deadline = Date().addingTimeInterval(5)
         while Date() < deadline, presenter.completions.isEmpty {
             try await Task.sleep(for: .milliseconds(50))
         }
         expect(
-            presenter.completions == [.claude],
-            "A finished streaming response must report exactly one completion",
+            presenter.completions == [service],
+            "\(service.title): a finished streaming response must report exactly one completion",
             failures: &failures
         )
 
-        // A short flicker of the streaming indicator must not notify.
         _ = try await evaluate("(window.flickerStreaming(60), true)", in: webView) as Bool
         try await Task.sleep(for: .milliseconds(600))
         expect(
-            presenter.completions == [.claude],
-            "A brief streaming flicker must not produce a completion notification",
+            presenter.completions == [service],
+            "\(service.title): a brief streaming flicker must not produce a completion notification",
             failures: &failures
         )
     }

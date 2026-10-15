@@ -28,6 +28,7 @@ struct ProviderAdapter {
                 ],
                 generationIndicatorSelectors: [
                     "button[data-testid='stop-button']",
+                    "button[aria-label='Stop']",
                     "button[aria-label='Stop streaming']",
                     "button[aria-label='Stop generating']"
                 ],

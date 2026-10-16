@@ -83,7 +83,7 @@ final class NotificationBridge: NSObject {
         userContentController.addUserScript(script)
         let responseWatcher = WKUserScript(
             source: NotificationScript.responseWatcherSource(
-                indicatorSelectors: ProviderAdapter.adapter(for: service).generationIndicatorSelectors,
+                adapter: ProviderAdapter.adapter(for: service),
                 allowedHosts: service.webNotificationHosts
             ),
             injectionTime: .atDocumentEnd,

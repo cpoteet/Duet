@@ -1861,7 +1861,16 @@ struct HostLifecycleTests {
 
     @MainActor
     private static func testResponseWatcherFixture(for service: ChatService, failures: inout [String]) async throws {
+        let fixtureScript = try String(contentsOf: fixtureURL("streaming-response.js"), encoding: .utf8)
         let fixtureHTML = try String(contentsOf: fixtureURL("streaming-response.html"), encoding: .utf8)
+            .replacingOccurrences(
+                of: "__COMPOSER_CONTAINER_CLASS__",
+                with: service == .chatGPT ? "ComposerLayoutRoot-fixture" : "relative w-full min-w-0"
+            )
+            .replacingOccurrences(
+                of: "<script src=\"streaming-response.js\"></script>",
+                with: "<script>\(fixtureScript)</script>"
+            )
         let presenter = RecordingNotificationPresenter(initial: .granted, afterRequest: .granted)
 
         let configuration = WKWebViewConfiguration()
@@ -1869,7 +1878,7 @@ struct HostLifecycleTests {
         let bridge = NotificationBridge(service: service, presenter: presenter)
         let watcher = WKUserScript(
             source: NotificationScript.responseWatcherSource(
-                indicatorSelectors: ProviderAdapter.adapter(for: service).generationIndicatorSelectors,
+                adapter: ProviderAdapter.adapter(for: service),
                 allowedHosts: service.webNotificationHosts,
                 pollIntervalMilliseconds: 50,
                 minimumGenerationMilliseconds: 200
@@ -1894,23 +1903,66 @@ struct HostLifecycleTests {
         }
         try await loader.loadHTML(fixtureHTML, baseURL: service.startURL, in: webView)
 
-        let deadline = Date().addingTimeInterval(5)
-        while Date() < deadline, presenter.completions.isEmpty {
-            try await Task.sleep(for: .milliseconds(50))
-        }
+        _ = try await evaluate("(window.setUnrelatedStop(true), true)", in: webView) as Bool
+        try await Task.sleep(for: .milliseconds(300))
+        _ = try await evaluate("(window.setUnrelatedStop(false), true)", in: webView) as Bool
+        try await Task.sleep(for: .milliseconds(100))
         expect(
-            presenter.completions == [service],
-            "\(service.title): a finished streaming response must report exactly one completion",
+            presenter.completions.isEmpty,
+            "\(service.title): an unrelated Stop button must not report generation",
             failures: &failures
         )
 
-        _ = try await evaluate("(window.flickerStreaming(60), true)", in: webView) as Bool
-        try await Task.sleep(for: .milliseconds(600))
+        _ = try await evaluate("(window.setUnrelatedStop(true), true)", in: webView) as Bool
+        let labels = ["Stop", "Stop streaming", "Stop generating", "Stop response", "sToP response generation"]
+        for (index, label) in labels.enumerated() {
+            _ = try await evaluate("(window.startStreaming('\(label)'), true)", in: webView) as Bool
+            try await Task.sleep(for: .milliseconds(300))
+            _ = try await evaluate("(window.finishStreaming(), true)", in: webView) as Bool
+            let deadline = Date().addingTimeInterval(1)
+            while Date() < deadline, presenter.completions.count < index + 1 {
+                try await Task.sleep(for: .milliseconds(25))
+            }
+            expect(
+                presenter.completions == Array(repeating: service, count: index + 1),
+                "\(service.title): \(label) must report one completion despite an unrelated Stop button",
+                failures: &failures
+            )
+        }
+
+        let expectedCompletionCount = presenter.completions.count
+        _ = try await evaluate("(window.startStreaming('Stop generating'), true)", in: webView) as Bool
+        try await Task.sleep(for: .milliseconds(60))
+        _ = try await evaluate("(window.finishStreaming(), true)", in: webView) as Bool
+        try await Task.sleep(for: .milliseconds(100))
         expect(
-            presenter.completions == [service],
+            presenter.completions.count == expectedCompletionCount,
             "\(service.title): a brief streaming flicker must not produce a completion notification",
             failures: &failures
         )
+
+        let testID = service == .chatGPT ? "stop-button" : "chat-input-stop"
+        _ = try await evaluate("(window.startStreaming(null, false, '\(testID)'), true)", in: webView) as Bool
+        try await Task.sleep(for: .milliseconds(300))
+        _ = try await evaluate("(window.finishStreaming(), true)", in: webView) as Bool
+        try await Task.sleep(for: .milliseconds(100))
+        expect(
+            presenter.completions.count == expectedCompletionCount + 1,
+            "\(service.title): provider stop test IDs must still report completion without a label",
+            failures: &failures
+        )
+
+        if service == .claude {
+            _ = try await evaluate("(window.startStreaming(null, true), true)", in: webView) as Bool
+            try await Task.sleep(for: .milliseconds(300))
+            _ = try await evaluate("(window.finishStreaming(), true)", in: webView) as Bool
+            try await Task.sleep(for: .milliseconds(100))
+            expect(
+                presenter.completions.count == expectedCompletionCount + 2,
+                "Claude: the streaming status must report completion without a stop button",
+                failures: &failures
+            )
+        }
     }
 
     @MainActor

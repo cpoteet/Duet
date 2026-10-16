@@ -164,7 +164,7 @@ enum NotificationScript {
     /// in-page Notification API (they require an unobtainable Web Push
     /// subscription) still get native completion notifications this way.
     static func responseWatcherSource(
-        indicatorSelectors: [String],
+        adapter: ProviderAdapter,
         allowedHosts: [String],
         pollIntervalMilliseconds: Int = 600,
         minimumGenerationMilliseconds: Int = 1500
@@ -179,13 +179,22 @@ enum NotificationScript {
           if (!allowedHosts.some(domain => host === domain || host.endsWith("." + domain))) return;
           window.__duetResponseWatcherInstalled = true;
 
-          const indicatorSelectors = \(jsonArray(indicatorSelectors));
+          const indicatorSelectors = \(jsonArray(adapter.generationIndicatorSelectors));
+          const composerSelectors = \(jsonArray(adapter.composerSelectors));
+          const controlScopeSelector = \(jsonString(adapter.generationControlScopeSelector));
+          const controlSelectors = \(jsonArray(adapter.generationControlSelectors));
           let wasGenerating = false;
           let generatingSince = 0;
           const evaluateState = () => {
             let generating = false;
             try {
               generating = indicatorSelectors.some(selector => document.querySelector(selector));
+              if (!generating) {
+                generating = composerSelectors.some(selector => Array.from(document.querySelectorAll(selector)).some(composer => {
+                  const scope = composer.closest(controlScopeSelector);
+                  return scope && controlSelectors.some(controlSelector => scope.querySelector(controlSelector));
+                }));
+              }
             } catch (_) {}
             const now = Date.now();
             if (generating) {

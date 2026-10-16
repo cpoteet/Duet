@@ -5,6 +5,8 @@ struct ProviderAdapter {
     let sendButtonSelectors: [String]
     /// Elements present only while the provider is generating a response.
     let generationIndicatorSelectors: [String]
+    let generationControlScopeSelector: String
+    let generationControlSelectors: [String]
     /// A provider-owned file input used to bridge WebKit file drops through
     /// the same upload path as the provider's working file picker.
     let fileDropInputSelector: String?
@@ -27,11 +29,10 @@ struct ProviderAdapter {
                     "button[type='submit']"
                 ],
                 generationIndicatorSelectors: [
-                    "button[data-testid='stop-button']",
-                    "button[aria-label='Stop']",
-                    "button[aria-label='Stop streaming']",
-                    "button[aria-label='Stop generating']"
+                    "button[data-testid='stop-button']"
                 ],
+                generationControlScopeSelector: "[class*='ComposerLayoutRoot-'], form",
+                generationControlSelectors: ["button[aria-label^='Stop' i]"],
                 fileDropInputSelector: nil
             )
         case .claude:
@@ -50,8 +51,10 @@ struct ProviderAdapter {
                 ],
                 generationIndicatorSelectors: [
                     "[data-is-streaming='true']",
-                    "button[aria-label='Stop response']"
+                    "button[data-testid='chat-input-stop']"
                 ],
+                generationControlScopeSelector: ".relative.w-full.min-w-0, form",
+                generationControlSelectors: ["button[aria-label^='Stop' i]"],
                 fileDropInputSelector: "input[type='file'][data-testid='file-upload']"
             )
         }

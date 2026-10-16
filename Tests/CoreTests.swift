@@ -159,12 +159,12 @@ struct CoreTests {
             let adapter = ProviderAdapter.adapter(for: service)
             expect(!adapter.generationIndicatorSelectors.isEmpty, "\(service.title) has no generation indicators")
             let watcher = NotificationScript.responseWatcherSource(
-                indicatorSelectors: adapter.generationIndicatorSelectors,
+                adapter: adapter,
                 allowedHosts: service.webNotificationHosts
             )
             expect(watcher.contains("responseComplete"), "\(service.title) watcher does not report completions")
             expect(watcher.contains("messageHandlers?.duetNotifications"), "\(service.title) watcher does not target the bridge handler")
-            for selector in adapter.generationIndicatorSelectors {
+            for selector in adapter.generationIndicatorSelectors + adapter.generationControlSelectors {
                 expect(watcher.contains(selector), "\(service.title) watcher does not check \(selector)")
             }
             for host in service.webNotificationHosts {

@@ -36,13 +36,24 @@ struct DuetApp: App {
         .windowResizability(.contentSize)
 
         .commands {
-            CommandGroup(replacing: .newItem) { }
+            CommandGroup(replacing: .newItem) {
+                Button("New Conversation") {
+                    applicationDelegate.revealWorkspace()
+                    appState.startNewConversation()
+                }
+                .keyboardShortcut("n")
+                .disabled(!appState.canStartNewConversation)
+            }
             CommandGroup(replacing: .appInfo) {
                 Button("About Duet") {
                     openWindow(id: "about")
                 }
             }
             CommandGroup(before: .sidebar) {
+                workspaceToggle("ChatGPT", target: .service(.chatGPT), key: "1")
+                workspaceToggle("Claude", target: .service(.claude), key: "2")
+                workspaceToggle("Both", target: .both, key: "3")
+                Divider()
                 Button("Equal Widths") {
                     equalizePaneWidths?()
                 }
@@ -68,5 +79,14 @@ struct DuetApp: App {
         Settings {
             SettingsView()
         }
+    }
+
+    private func workspaceToggle(_ title: String, target: PromptTarget, key: KeyEquivalent) -> some View {
+        Toggle(title, isOn: Binding(
+            get: { appState.isShowingWorkspace(for: target) },
+            set: { _ in appState.openWorkspace(for: target) }
+        ))
+        .keyboardShortcut(key)
+        .disabled(appState.hasActiveOperations)
     }
 }

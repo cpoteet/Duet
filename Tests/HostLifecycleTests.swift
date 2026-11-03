@@ -803,7 +803,19 @@ struct HostLifecycleTests {
 
         let workspaceState = AppState(userDefaults: startupDefaults)
         expect(workspaceState.isLaunchChooserVisible, "Workspace should begin at the tool chooser")
+        expect(!workspaceState.canStartNewConversation, "New Conversation needs a provider workspace")
+        expect(
+            ![PromptTarget.service(.chatGPT), .service(.claude), .both].contains(where: workspaceState.isShowingWorkspace),
+            "The tool chooser should not mark any workspace as shown"
+        )
         workspaceState.openWorkspace(for: .service(.claude))
+        expect(workspaceState.canStartNewConversation, "New Conversation should be available in a provider workspace")
+        expect(
+            workspaceState.isShowingWorkspace(for: .service(.claude))
+                && !workspaceState.isShowingWorkspace(for: .service(.chatGPT))
+                && !workspaceState.isShowingWorkspace(for: .both),
+            "Only the Claude workspace should be marked as shown"
+        )
         expect(!workspaceState.isLaunchChooserVisible, "A provider destination should leave the tool chooser")
         expect(workspaceState.selectedService == .claude, "Claude destination should select Claude")
         expect(!workspaceState.isSplitView, "A single-provider destination should use one pane")
@@ -829,6 +841,10 @@ struct HostLifecycleTests {
         )
         workspaceState.openWorkspace(for: .both)
         expect(workspaceState.isSplitView, "Both destination should use split view")
+        expect(
+            workspaceState.isShowingWorkspace(for: .both) && !workspaceState.isShowingWorkspace(for: .service(.chatGPT)),
+            "Only the Both workspace should be marked as shown in split view"
+        )
         expect(workspaceState.isPromptDrawerOpen, "Choosing Both should immediately open the prompt drawer")
         expect(
             startupDefaults.string(forKey: AppPreferenceKey.lastWorkspaceDestination) == StartupDestination.both.rawValue,

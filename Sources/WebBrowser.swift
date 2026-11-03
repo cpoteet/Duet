@@ -164,7 +164,7 @@ final class BrowserController: NSObject, ObservableObject {
         }
     }
 
-    private func openNewConversation() {
+    func openNewConversation() {
         let webView = prepare()
         webView.stopLoading()
         beginProgrammaticNavigation()

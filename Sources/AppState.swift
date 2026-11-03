@@ -316,6 +316,24 @@ final class AppState: ObservableObject {
         !activeDispatchServices.isEmpty || !resettingServices.isEmpty
     }
 
+    var canStartNewConversation: Bool {
+        !isLaunchChooserVisible && !hasActiveOperations
+    }
+
+    func startNewConversation() {
+        guard canStartNewConversation else { return }
+        services(for: isSplitView ? .both : .current).forEach { browser(for: $0).openNewConversation() }
+    }
+
+    func isShowingWorkspace(for target: PromptTarget) -> Bool {
+        guard !isLaunchChooserVisible else { return false }
+        switch target {
+        case .current: return true
+        case .service(let service): return !isSplitView && selectedService == service
+        case .both: return isSplitView
+        }
+    }
+
     func consumeDispatchNotice(_ id: UUID) {
         guard dispatchNotice?.id == id else { return }
         dispatchNotice = nil

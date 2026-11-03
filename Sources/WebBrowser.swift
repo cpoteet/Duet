@@ -399,7 +399,7 @@ final class BrowserController: NSObject, ObservableObject {
                     let result = try await evaluate(adapter.submissionScript(prompt: prompt), as: ScriptResult.self)
                     didClickSend = result.ok
                     if didClickSend {
-                        deadline = Date().addingTimeInterval(30)
+                        deadline = Date().addingTimeInterval(10)
                     }
                 }
             } catch {

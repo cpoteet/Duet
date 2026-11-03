@@ -380,7 +380,7 @@ final class BrowserController: NSObject, ObservableObject {
         prompt: String,
         timeout: TimeInterval
     ) async -> PromptDispatchOutcome {
-        let deadline = Date().addingTimeInterval(timeout)
+        var deadline = Date().addingTimeInterval(timeout)
         var didClickSend = false
         while Date() < deadline {
             if Task.isCancelled { return .failed("Send cancelled") }
@@ -398,6 +398,9 @@ final class BrowserController: NSObject, ObservableObject {
                 } else {
                     let result = try await evaluate(adapter.submissionScript(prompt: prompt), as: ScriptResult.self)
                     didClickSend = result.ok
+                    if didClickSend {
+                        deadline = Date().addingTimeInterval(30)
+                    }
                 }
             } catch {
                 return .failed("Could not execute prompt")

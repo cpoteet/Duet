@@ -1016,6 +1016,7 @@ struct HostLifecycleTests {
                 )
             }
             try await testDelayedSend(failures: &failures)
+            try await testClaudeSubmissionTiming(failures: &failures)
             try await testRepeatedPromptConfirmation(failures: &failures)
             try await testExistingDraftProtection(failures: &failures)
             try await testSignedOutFixture(failures: &failures)
@@ -1332,6 +1333,61 @@ struct HostLifecycleTests {
             in: webView
         )
         expect(confirmed, "Delayed submission was not confirmed", failures: &failures)
+    }
+
+    @MainActor
+    private static func testClaudeSubmissionTiming(failures: inout [String]) async throws {
+        let fixtureScript = try String(contentsOf: fixtureURL("delayed-confirmation.js"), encoding: .utf8)
+        let fixtureHTML = try String(contentsOf: fixtureURL("delayed-confirmation.html"), encoding: .utf8)
+            .replacingOccurrences(
+                of: "<script src=\"delayed-confirmation.js\"></script>",
+                with: "<script>\(fixtureScript)</script>"
+            )
+        for (configuration, expectedOutcome) in [
+            ("3000, 5500", PromptDispatchOutcome.sent),
+            ("0, null", .failed("Could not confirm prompt was sent")),
+            ("null, null", .failed("Send button did not become ready"))
+        ] {
+            let state = AppState(startupDestination: .claude)
+            let browser = state.browser(for: .claude)
+            let webView = browser.prepare()
+            defer { browser.release() }
+            webView.configuration.userContentController.removeAllUserScripts()
+            webView.loadHTMLString(fixtureHTML, baseURL: ChatService.claude.startURL)
+            let loadDeadline = Date().addingTimeInterval(5)
+            while browser.phase != .ready, Date() < loadDeadline {
+                try await Task.sleep(for: .milliseconds(25))
+            }
+            guard browser.phase == .ready else {
+                failures.append("Claude timing fixture did not load")
+                continue
+            }
+            _ = try await evaluate("(window.configureSubmission(\(configuration)), true)", in: webView) as Bool
+            state.prompt = "Delayed Claude submission"
+            state.isPromptDrawerOpen = true
+            let results = await state.send(draft: state.capturePromptDraft(), to: .service(.claude))
+            expect(
+                results == [PromptDispatchResult(service: .claude, outcome: expectedOutcome)],
+                "Claude timing fixture (\(configuration)) returned \(results)",
+                failures: &failures
+            )
+            let clicks: Int = try await evaluate("window.sendClicks", in: webView)
+            expect(
+                clicks == (configuration == "null, null" ? 0 : 1),
+                "Claude timing fixture must click Send only once after it becomes ready",
+                failures: &failures
+            )
+            expect(
+                state.prompt.isEmpty == expectedOutcome.wasSent,
+                "Only confirmed Claude submissions should clear the drawer draft",
+                failures: &failures
+            )
+            expect(
+                state.isPromptDrawerOpen != expectedOutcome.wasSent,
+                "Only confirmed Claude submissions should collapse the drawer",
+                failures: &failures
+            )
+        }
     }
 
     @MainActor

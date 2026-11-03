@@ -185,7 +185,9 @@ enum NotificationScript {
           const controlSelectors = \(jsonArray(adapter.generationControlSelectors));
           let wasGenerating = false;
           let generatingSince = 0;
+          let lastEvaluation = 0;
           const evaluateState = () => {
+            lastEvaluation = Date.now();
             let generating = false;
             try {
               generating = indicatorSelectors.some(selector => document.querySelector(selector));
@@ -208,10 +210,10 @@ enum NotificationScript {
               bridge.postMessage({ type: "responseComplete" }).catch(() => {});
             }
           };
-          // Mutations drive detection so state changes register even while
-          // WebKit throttles timers in hidden views; the interval is only a
-          // low-frequency heartbeat.
-          new MutationObserver(evaluateState).observe(document.documentElement, {
+          // Visible pages rely on the unthrottled heartbeat, so mutation bursts can't stall rendering.
+          new MutationObserver(() => {
+            if (document.visibilityState === "hidden" || Date.now() - lastEvaluation >= 250) evaluateState();
+          }).observe(document.documentElement, {
             childList: true,
             subtree: true,
             attributes: true

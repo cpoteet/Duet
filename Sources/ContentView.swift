@@ -1,6 +1,17 @@
 import AppKit
 import SwiftUI
 
+private struct EqualizePaneWidthsKey: FocusedValueKey {
+    typealias Value = () -> Void
+}
+
+extension FocusedValues {
+    var equalizePaneWidths: (() -> Void)? {
+        get { self[EqualizePaneWidthsKey.self] }
+        set { self[EqualizePaneWidthsKey.self] = newValue }
+    }
+}
+
 struct ContentView: View {
     @ObservedObject var appState: AppState
     @State private var isPreparingPromptDispatch = false
@@ -50,11 +61,10 @@ struct ContentView: View {
                     .labelStyle(.titleAndIcon)
                     .keyboardShortcut("p", modifiers: [.command, .shift])
                     .help(appState.isPromptDrawerOpen ? "Close shared prompt" : "Open shared prompt")
-
-                    layoutMenu
                 }
             }
         }
+        .focusedSceneValue(\.equalizePaneWidths, equalizePaneWidthsAction)
         .animation(.easeOut(duration: 0.2), value: appState.isSplitView)
         .animation(.easeOut(duration: 0.2), value: appState.updateAvailable)
         .task {
@@ -233,23 +243,12 @@ struct ContentView: View {
         .help("Choose which providers to show")
     }
 
-    private var layoutMenu: some View {
-        Menu {
-            Button("Single Pane") { appState.setSplitView(false) }
-                .disabled(!appState.isSplitView)
-            Button("Split View") { appState.setSplitView(true) }
-                .disabled(appState.isSplitView)
-            Divider()
-            Button("Equal Widths") {
-                splitViewRatio = 0.5
-                splitViewResetID += 1
-            }
-            .disabled(!appState.isSplitView)
-        } label: {
-            Label("Layout", systemImage: "rectangle.split.2x1")
+    private var equalizePaneWidthsAction: (() -> Void)? {
+        guard appState.isSplitView, !appState.hasActiveOperations else { return nil }
+        return {
+            splitViewRatio = 0.5
+            splitViewResetID += 1
         }
-        .disabled(appState.hasActiveOperations)
-        .help("Change the workspace layout")
     }
 
     @ViewBuilder

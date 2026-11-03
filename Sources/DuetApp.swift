@@ -9,6 +9,7 @@ struct DuetApp: App {
     )
     @NSApplicationDelegateAdaptor(DuetApplicationDelegate.self) private var applicationDelegate
     @Environment(\.openWindow) private var openWindow
+    @FocusedValue(\.equalizePaneWidths) private var equalizePaneWidths
 
     var body: some Scene {
         WindowGroup("Duet", id: "workspace") {
@@ -40,6 +41,12 @@ struct DuetApp: App {
                 Button("About Duet") {
                     openWindow(id: "about")
                 }
+            }
+            CommandGroup(before: .sidebar) {
+                Button("Equal Widths") {
+                    equalizePaneWidths?()
+                }
+                .disabled(equalizePaneWidths == nil)
             }
             CommandMenu("Session") {
                 Button("Reset ChatGPT Website Data", role: .destructive) {

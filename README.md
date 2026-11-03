@@ -9,7 +9,7 @@ Duet is a native macOS workspace for ChatGPT and Claude. It keeps each service i
 ## Features
 
 - **ChatGPT and Claude in one app.** Choose either provider at launch, then switch between them without opening a separate browser window.
-- **Side-by-side comparison.** Choose **Both** in the workspace toolbar to keep ChatGPT and Claude visible together; resize the native divider or use **Layout → Equal Widths**.
+- **Side-by-side comparison.** Choose **Both** in the workspace toolbar to keep ChatGPT and Claude visible together; resize the native divider or use **View → Equal Widths**.
 - **Quick Prompt from anywhere.** Press **Control–Option–Space**, or choose **Tools → Quick Prompt**, to send a prompt to a new ChatGPT conversation, a new Claude conversation, or both.
 - **Your preferred startup view.** Keep the destination chooser, open directly to ChatGPT, Claude, or Both, or return to the workspace you used last. Duet also remembers your workspace size between launches.
 - **Shared prompt drawer.** Open **Prompt** in the workspace toolbar to send plain-text prompts to the active provider or to both providers at once.
@@ -36,7 +36,7 @@ Reminder that you use this application at your own risk.
 1. Launch Duet and choose **ChatGPT**, **Claude**, or **Both**. In Settings, you can instead choose a destination Duet should open automatically on future launches.
 2. Sign in directly in the embedded provider page. Complete any passkey, two-factor authentication, or verification steps there.
 3. When you first use provider dictation or audio chat, allow Duet to access the microphone in the macOS permission prompt. The same applies to requests for your location.
-4. Use the workspace picker in the toolbar to show **ChatGPT**, **Claude**, or **Both**. The **Layout** menu also switches between single and split view.
+4. Use the workspace picker in the toolbar to show **ChatGPT**, **Claude**, or **Both**. In split view, choose **View → Equal Widths** to balance the panes.
 5. For faster switching at the cost of additional memory, open **Duet → Settings** and enable **Keep both providers loaded**.
 6. Open **Prompt** in the toolbar, or press **Command–Shift–P**, when you want to enter a text-only prompt. Send it to the active provider or choose **Send to Both** to submit the same prompt to ChatGPT and Claude. The drawer opens automatically when you enter split view. After every selected provider confirms submission, the draft clears and the drawer collapses.
 7. From any app, press **Control–Option–Space** to open **Quick Prompt**. Choose **ChatGPT**, **Claude**, or **Both**; Duet brings its workspace forward and starts a fresh conversation with each selected provider. You can also open Quick Prompt from **Tools → Quick Prompt** while Duet is active.

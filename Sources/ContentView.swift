@@ -20,6 +20,7 @@ struct ContentView: View {
     @State private var splitViewResetID = 0
     @State private var toast: DispatchToast?
     @State private var toastDismissal: Task<Void, Never>?
+    @FocusState private var isDrawerPromptFocused: Bool
     @Environment(\.colorScheme) private var colorScheme
 
     private let minimumPaneWidth: CGFloat = 280
@@ -321,6 +322,14 @@ struct ContentView: View {
         expandedComposer
         .background(.thinMaterial)
         .overlay(alignment: .top) { hairline }
+        .task(id: appState.isSplitView) {
+            try? await Task.sleep(for: .milliseconds(250))
+            isDrawerPromptFocused = true
+        }
+        .onChange(of: appState.promptFocusRequest) {
+            isDrawerPromptFocused = false
+            Task { isDrawerPromptFocused = true }
+        }
     }
 
     private var expandedComposer: some View {
@@ -344,6 +353,7 @@ struct ContentView: View {
             }
 
             TextEditor(text: $appState.prompt)
+                .focused($isDrawerPromptFocused)
                 .font(.system(size: 15))
                 .scrollContentBackground(.hidden)
                 .padding(8)

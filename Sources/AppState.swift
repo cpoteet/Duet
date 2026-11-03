@@ -10,7 +10,9 @@ struct PromptDraftSnapshot {
 final class AppState: ObservableObject {
     @Published var selectedService: ChatService = .chatGPT
     @Published var isSplitView = false
-    @Published var isPromptDrawerOpen = false
+    @Published var isPromptDrawerOpen = false {
+        didSet { reservePromptFocus() }
+    }
     @Published private(set) var isLaunchChooserVisible = true
     @Published var prompt = "" {
         didSet { promptRevision &+= 1 }
@@ -19,6 +21,7 @@ final class AppState: ObservableObject {
     @Published private(set) var resettingServices: Set<ChatService> = []
     @Published private(set) var dispatchNotice: DispatchNotice?
     @Published private(set) var updateAvailable: UpdateInfo?
+    @Published private(set) var promptFocusRequest = 0
 
     private let browsers: [ChatService: BrowserController]
     private var promptRevision = 0
@@ -56,6 +59,12 @@ final class AppState: ObservableObject {
             _ = browser(for: selectedService).prepare()
         }
         recordCurrentWorkspaceDestination()
+        reservePromptFocus()
+        browsers.values.forEach { $0.restorePromptFocus = { [weak self] in self?.promptFocusRequest &+= 1 } }
+    }
+
+    private func reservePromptFocus() {
+        browsers.values.forEach { $0.reservesFocusForPrompt = isPromptDrawerOpen }
     }
 
     func browser(for service: ChatService) -> BrowserController {

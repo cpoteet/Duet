@@ -245,6 +245,28 @@ struct HostLifecycleTests {
             "A detached transient host must not steal a web view from the visible host"
         )
 
+        let drawerWindow = NSWindow(
+            contentRect: .init(x: 0, y: 0, width: 400, height: 400),
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        let drawerWebView = ProviderWebView(frame: drawerWindow.contentView?.bounds ?? .zero, configuration: WKWebViewConfiguration())
+        drawerWindow.contentView?.addSubview(drawerWebView)
+        var reservesDrawerFocus = true
+        drawerWebView.reservesFocusForPrompt = { reservesDrawerFocus }
+        drawerWindow.makeFirstResponder(drawerWebView)
+        expect(
+            drawerWindow.firstResponder !== drawerWebView,
+            "An open prompt drawer must keep pages from taking keyboard focus"
+        )
+        reservesDrawerFocus = false
+        drawerWindow.makeFirstResponder(drawerWebView)
+        expect(
+            drawerWindow.firstResponder === drawerWebView,
+            "Pages must take keyboard focus normally while the prompt drawer is closed"
+        )
+
         weak var releasedWebView: WKWebView?
         autoreleasepool {
             let releaseHost = BrowserHostView(frame: .init(x: 0, y: 0, width: 400, height: 400))

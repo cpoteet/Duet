@@ -11,6 +11,8 @@ final class BrowserController: NSObject, ObservableObject {
 
     @Published private(set) var phase: BrowserPhase = .unloaded
     @Published private(set) var webView: WKWebView?
+    var reservesFocusForPrompt = false
+    var restorePromptFocus: () -> Void = {}
     private lazy var notificationBridge = NotificationBridge(
         service: service,
         presenter: DuetNotificationManager.shared
@@ -51,7 +53,9 @@ final class BrowserController: NSObject, ObservableObject {
             ))
         }
 
-        let newWebView = WKWebView(frame: .zero, configuration: configuration)
+        let newWebView = ProviderWebView(frame: .zero, configuration: configuration)
+        newWebView.reservesFocusForPrompt = { [weak self] in self?.reservesFocusForPrompt == true }
+        newWebView.onRefusedFocus = { [weak self] in self?.restorePromptFocus() }
         newWebView.allowsBackForwardNavigationGestures = true
         newWebView.navigationDelegate = self
         newWebView.uiDelegate = self
@@ -902,6 +906,33 @@ final class BrowserHostView: NSView {
     private func updateCanvasColor() {
         let isDark = effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
         layer?.backgroundColor = (isDark ? Canvas.dark : Canvas.light).cgColor
+    }
+}
+
+/// While the prompt drawer is open, pages may not move keyboard focus into themselves; only the user can.
+final class ProviderWebView: WKWebView {
+    var reservesFocusForPrompt: () -> Bool = { false }
+    var onRefusedFocus: () -> Void = {}
+
+    override func becomeFirstResponder() -> Bool {
+        guard !reservesFocusForPrompt() || isUserFocusEvent(NSApp.currentEvent) else {
+            // AppKit has already taken focus from the prompt, so hand it back once this attempt ends.
+            Task { @MainActor [onRefusedFocus] in onRefusedFocus() }
+            return false
+        }
+        return super.becomeFirstResponder()
+    }
+
+    private func isUserFocusEvent(_ event: NSEvent?) -> Bool {
+        guard let event, event.window === window else { return false }
+        switch event.type {
+        case .leftMouseDown, .rightMouseDown, .otherMouseDown:
+            return bounds.contains(convert(event.locationInWindow, from: nil))
+        case .keyDown:
+            return event.keyCode == 48
+        default:
+            return false
+        }
     }
 }
 

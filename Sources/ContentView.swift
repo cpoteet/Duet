@@ -347,7 +347,7 @@ struct ContentView: View {
                 .font(.system(size: 15))
                 .scrollContentBackground(.hidden)
                 .padding(8)
-                .frame(minHeight: 70, maxHeight: 118)
+                .frame(minHeight: 70, maxHeight: 85)
                 .background(palette.textField, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
                 .overlay {
                     RoundedRectangle(cornerRadius: 12, style: .continuous)

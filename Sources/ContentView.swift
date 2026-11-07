@@ -46,7 +46,7 @@ struct ContentView: View {
         .frame(minWidth: 900, minHeight: 650)
         .background { WorkspaceWindowMarker() }
         .toolbar(removing: .title)
-        .containerBackground(.thinMaterial, for: .window)
+        .containerBackground(palette.windowBackground, for: .window)
         .toolbar {
             if !appState.isLaunchChooserVisible {
                 ToolbarItem(placement: .principal) {
@@ -685,6 +685,8 @@ private struct AppPalette {
     let scheme: ColorScheme
 
     private var isDark: Bool { scheme == .dark }
+    // Opaque so the desktop doesn't show through the toolbar band (#EFF1F3 light, #2B2D30 dark).
+    var windowBackground: Color { isDark ? Color(red: 0.169, green: 0.176, blue: 0.188) : Color(red: 0.937, green: 0.945, blue: 0.953) }
     var drawer: Color { isDark ? Color(red: 0.08, green: 0.085, blue: 0.10) : Color(red: 0.965, green: 0.963, blue: 0.95) }
     var textField: Color { isDark ? Color(red: 0.105, green: 0.11, blue: 0.13) : .white }
     var primaryText: Color { isDark ? Color(red: 0.91, green: 0.92, blue: 0.94) : Color(red: 0.10, green: 0.11, blue: 0.13) }

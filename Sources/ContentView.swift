@@ -46,7 +46,7 @@ struct ContentView: View {
         .frame(minWidth: 900, minHeight: 650)
         .background { WorkspaceWindowMarker() }
         .toolbar(removing: .title)
-        .toolbarBackground(.thinMaterial, for: .windowToolbar)
+        .containerBackground(.thinMaterial, for: .window)
         .toolbar {
             if !appState.isLaunchChooserVisible {
                 ToolbarItem(placement: .principal) {

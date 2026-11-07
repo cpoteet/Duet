@@ -2,7 +2,7 @@
 
 Duet is a native macOS workspace for ChatGPT and Claude. It keeps each service in its familiar web interface while giving you a focused way to switch between them, compare them side by side, send one text prompt to both, or start a fresh conversation from anywhere on your Mac.
 
-![Duet showing ChatGPT and Claude side by side](Screenshots/split-view.png)
+![Duet in split view, with ChatGPT and Claude answering the same question side by side](Screenshots/split-view.png)
 
 [See the single-provider view](Screenshots/single-view.png).
 

@@ -24,7 +24,7 @@ Duet is a native macOS workspace for ChatGPT and Claude. It keeps each service i
 
 ## Install
 
-Duet is supported on Apple Silicon Macs with macOS 27 or later.
+Duet requires macOS 27 or later.
 
 1. Download `Duet.zip` from the [latest Duet release](https://github.com/cpoteet/Duet/releases/latest) and double-click it to extract the archive.
 2. Drag `Duet.app` to your **Applications** folder.

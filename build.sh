@@ -46,7 +46,8 @@ xcrun swiftc \
   -o "$EXECUTABLE"
 
 for resource in "$ROOT"/Resources/*; do
-  [[ "${resource:t}" == "Info.plist" || "${resource:t}" == "Release.entitlements" ]] && continue
+  # DuetIcon.svg is the editable source for DuetIcon.png and does not ship in the bundle.
+  [[ "${resource:t}" == "Info.plist" || "${resource:t}" == "Release.entitlements" || "${resource:t}" == "DuetIcon.svg" ]] && continue
   cp -R "$resource" "$APP_BUNDLE/Contents/Resources/"
 done
 cp "$INFO_PLIST" "$APP_BUNDLE/Contents/Info.plist"

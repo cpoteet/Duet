@@ -5,7 +5,7 @@ const menuLinks = document.querySelector('#nav-links');
 function setMenuOpen(open) {
   navigation.classList.toggle('is-open', open);
   menuToggle.setAttribute('aria-expanded', String(open));
-  menuToggle.textContent = open ? 'Close' : 'Menu';
+  menuToggle.setAttribute('aria-label', open ? 'Close menu' : 'Open menu');
 }
 
 menuToggle.hidden = false;
@@ -16,7 +16,8 @@ menuToggle.addEventListener('click', () => {
 });
 
 menuLinks.addEventListener('click', (event) => {
-  if (event.target.closest('a')) setMenuOpen(false);
+  // A link, or the dimmed page below the panel (which belongs to the panel element).
+  if (event.target.closest('a') || event.target === menuLinks) setMenuOpen(false);
 });
 
 document.addEventListener('click', (event) => {

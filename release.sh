@@ -25,6 +25,8 @@ if ! xcrun notarytool history --keychain-profile "$NOTARY_PROFILE" >/dev/null; t
   exit 1
 fi
 
+"$ROOT/site-version.sh"
+
 rm -f "$ROOT/Duet.zip"
 DUET_BUILD_ONLY=1 DUET_RELEASE=1 DUET_SIGNING_IDENTITY="$SIGNING_IDENTITY" "$ROOT/build.sh"
 codesign --verify --deep --strict --verbose=2 "$APP_BUNDLE"
@@ -46,3 +48,7 @@ fi
 
 xcrun stapler staple "$APP_BUNDLE"
 "$ROOT/package.sh"
+
+if ! git -C "$ROOT" diff --quiet -- site/index.html; then
+  echo "site/index.html now shows the new version. Commit it with the release; pushing to main deploys the site."
+fi

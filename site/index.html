@@ -4,9 +4,22 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="light dark">
-  <meta name="description" content="Duet is a native macOS workspace for ChatGPT and Claude. Compare them side by side, send a prompt to both, and start a conversation from anywhere on your Mac.">
   <title>Duet — ChatGPT and Claude, side by side</title>
+  <meta name="description" content="Duet is a native Mac app for using ChatGPT and Claude side by side. Send one prompt to both, or start a conversation from any app with Quick Prompt.">
+  <link rel="canonical" href="https://cpoteet.github.io/Duet/">
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="Duet">
+  <meta property="og:url" content="https://cpoteet.github.io/Duet/">
+  <meta property="og:title" content="Duet — ChatGPT and Claude, side by side">
+  <meta property="og:description" content="A native Mac app for using ChatGPT and Claude side by side, and sending one prompt to both.">
+  <meta property="og:image" content="https://cpoteet.github.io/Duet/assets/social-card.png">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:image:alt" content="Duet showing ChatGPT and Claude answering the same prompt side by side">
+  <meta name="twitter:card" content="summary_large_image">
   <link rel="icon" type="image/png" href="assets/duet-icon.png">
+  <link rel="apple-touch-icon" href="assets/duet-icon.png">
+  <link rel="preload" href="assets/geist-latin.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="styles.css">
   <script src="script.js" defer></script>
 </head>
@@ -22,137 +35,123 @@
       <div class="nav-links" id="nav-links">
         <a href="#features">Features</a>
         <a href="#start">Get started</a>
-        <a href="#license">License</a>
         <a class="button button-primary nav-download" href="https://github.com/cpoteet/Duet/releases/latest">Download</a>
       </div>
     </nav>
   </header>
 
   <main id="top">
-    <section class="hero container" aria-labelledby="hero-heading">
-      <h1 id="hero-heading">ChatGPT and Claude, side by side.</h1>
-      <p class="hero-description">Duet keeps each service in its familiar web interface while giving you a focused way to switch between them, compare them side by side, send one text prompt to both, or start a fresh conversation from anywhere on your Mac.</p>
-      <div class="hero-actions">
-        <a class="button button-primary" href="https://github.com/cpoteet/Duet/releases/latest">Download Duet</a>
-        <a class="button button-secondary" href="https://github.com/cpoteet/Duet">View on GitHub</a>
+    <section class="hero" aria-labelledby="hero-heading">
+      <div class="container hero-copy">
+        <h1 id="hero-heading">ChatGPT and Claude, side by side.</h1>
+        <p class="hero-description">A native Mac app for using ChatGPT and Claude together, and sending one prompt to both.</p>
+        <div class="hero-actions">
+          <a class="button button-primary" href="https://github.com/cpoteet/Duet/releases/latest"><span>Download Duet <span data-version="short">2.2</span></span></a>
+          <a class="button button-secondary" href="https://github.com/cpoteet/Duet">View on GitHub</a>
+        </div>
+        <p class="requirements">Free · Version <span data-version="full">2.2.0</span> · Apple Silicon · macOS 27 or later · <a data-release-notes href="https://github.com/cpoteet/Duet/releases/tag/v2.2.0">Release notes</a></p>
       </div>
-      <p class="requirements">Apple Silicon · macOS 27 or later</p>
-      <div class="workspace-preview">
-        <img src="assets/split-view.png" alt="Duet showing ChatGPT and Claude side by side" width="1000" height="623" fetchpriority="high">
+      <div class="hero-stage">
+        <div class="container">
+          <img class="hero-shot" src="assets/split-answers.webp" srcset="assets/split-answers.webp 1197w, assets/split-answers@2x.webp 2394w" sizes="(min-width: 1168px) 1120px, calc(100vw - 40px)" alt="Duet in split view, with ChatGPT and Claude each answering the same question about processes and threads" width="1197" height="704" fetchpriority="high">
+        </div>
       </div>
     </section>
 
-    <section class="section container" id="features" aria-labelledby="features-heading">
-      <p class="section-label">Features</p>
-      <h2 id="features-heading">Two assistants, one focused workspace.</h2>
-      <div class="feature-grid">
-        <article class="feature">
-          <h3>Side-by-side comparison</h3>
-          <p>Choose Both in the workspace toolbar to keep ChatGPT and Claude visible together, then resize the divider or set equal widths.</p>
-        </article>
-        <article class="feature">
-          <h3>Quick Prompt from anywhere</h3>
-          <p>Press Control–Option–Space to send a prompt to a new ChatGPT conversation, a new Claude conversation, or both.</p>
-        </article>
-        <article class="feature">
-          <h3>Shared prompt drawer</h3>
-          <p>Send plain-text prompts to the active provider or to both providers at once.</p>
-        </article>
-        <article class="feature">
-          <h3>Your familiar AI workspaces</h3>
-          <p>Conversations, chat history, attachments, and provider-specific tools stay inside the official websites.</p>
-        </article>
-        <article class="feature">
-          <h3>Native to macOS</h3>
-          <p>Keyboard shortcuts to switch workspaces and start new conversations, standard file pickers and save dialogs, and macOS permission prompts for microphone, camera, and location.</p>
-        </article>
-        <article class="feature">
-          <h3>Privacy-minded by design</h3>
-          <p>Sign in directly with each provider. Sessions normally persist between launches, and Duet does not collect, store, or transmit your credentials.</p>
-        </article>
+    <section class="band" id="features" aria-labelledby="quick-prompt-heading">
+      <div class="container">
+        <div class="band-head">
+          <div>
+            <p class="section-label">Quick Prompt</p>
+            <h2 id="quick-prompt-heading">Ask from any app.</h2>
+          </div>
+          <div>
+            <p class="lead">Press <span class="keys" role="img" aria-label="Control, Option, Space"><kbd>⌃</kbd><kbd>⌥</kbd><kbd>Space</kbd></span> wherever you are. Type a question, pick ChatGPT, Claude, or Both, and Duet opens a fresh conversation with each one.</p>
+            <p class="lead-note">It's also in Tools → Quick Prompt. If the workspace is hidden or minimized, Duet brings it back.</p>
+          </div>
+        </div>
+        <figure class="demo">
+          <video class="demo-video" src="assets/quick-prompt-demo.mp4" poster="assets/quick-prompt-demo-poster.webp" width="1600" height="942" muted loop playsinline controls preload="metadata" aria-label="Quick Prompt opening over a TextEdit note, sending a packing question to Both, and Duet coming forward as ChatGPT and Claude answer side by side"></video>
+          <button class="demo-toggle" type="button" hidden>Play</button>
+        </figure>
       </div>
+    </section>
+
+    <section class="section container" id="mac-features" aria-labelledby="features-heading">
+      <p class="section-label">Features</p>
+      <h2 id="features-heading">Built around the official websites.</h2>
+      <p class="section-intro">ChatGPT and Claude run in their own pages, so history, attachments, projects, and voice work the way you're used to. Duet adds the Mac parts.</p>
+
+      <div class="feature-row feature-row-wide">
+        <div class="feature-copy">
+          <h3>One prompt, two answers</h3>
+          <p>Open the prompt drawer with <kbd>⌘</kbd><kbd>⇧</kbd><kbd>P</kbd> and choose Send to Both. Duet confirms each provider on its own, so a failed send never clears your draft.</p>
+        </div>
+        <div class="feature-visual">
+          <img src="assets/drawer-crop.webp" srcset="assets/drawer-crop.webp 1197w, assets/drawer-crop@2x.webp 2394w" sizes="(min-width: 1168px) 1120px, calc(100vw - 40px)" alt="The shared prompt drawer under both provider panes, with a follow-up draft and a Send to Both button" width="1197" height="394" loading="lazy">
+        </div>
+      </div>
+
+      <div class="feature-row feature-row-flip">
+        <div class="feature-visual feature-visual-soft">
+          <img src="assets/settings.webp" srcset="assets/settings.webp 712w, assets/settings@2x.webp 1424w" sizes="(min-width: 1000px) 560px, calc(100vw - 40px)" alt="Duet Settings with startup, Keep both providers loaded, and response notification options" width="712" height="478" loading="lazy">
+        </div>
+        <div class="feature-copy">
+          <h3>Opens the way you work</h3>
+          <p>Start at the chooser, at ChatGPT, Claude, or Both, or wherever you left off. Keep both providers loaded for instant switching, and get a notification when a response finishes while Duet is out of view.</p>
+        </div>
+      </div>
+
+      <ul class="feature-list">
+        <li><h3>Keyboard first</h3><p><kbd>⌘</kbd><kbd>1–3</kbd> switches between ChatGPT, Claude, and Both. <kbd>⌘</kbd><kbd>N</kbd> starts a new conversation, in both panes when split.</p></li>
+        <li><h3>Adjustable split</h3><p>Drag the divider to give one side more room, or choose View → Equal Widths.</p></li>
+        <li><h3>Native files</h3><p>Attach with the standard file picker and save generated files with a macOS save dialog.</p></li>
+        <li><h3>Mac permissions</h3><p>Microphone, camera, and location go through macOS prompts, and only for ChatGPT and Claude pages.</p></li>
+        <li><h3>Your sign-in stays yours</h3><p>Sign in with each provider, including passkeys and two-factor. Duet doesn't collect, store, or transmit your credentials.</p></li>
+        <li><h3>Update notices</h3><p>A banner tells you when a new release is out. Nothing downloads or installs on its own.</p></li>
+      </ul>
     </section>
 
     <section class="section container" id="start" aria-labelledby="start-heading">
-      <div class="start-grid">
-        <div>
-          <p class="section-label">Get started</p>
-          <h2 id="start-heading">Up and running in a minute.</h2>
-          <p class="start-description">Sign in directly with each provider. Duet does not collect, store, or transmit your credentials.</p>
-          <div class="shortcuts">
-            <div class="shortcut">
-              <span>Quick Prompt from any app</span>
-              <span class="keys" role="img" aria-label="Control, Option, Space"><kbd>⌃</kbd><kbd>⌥</kbd><kbd>Space</kbd></span>
-            </div>
-            <div class="shortcut">
-              <span>Open the prompt drawer</span>
-              <span class="keys" role="img" aria-label="Command, Shift, P"><kbd>⌘</kbd><kbd>⇧</kbd><kbd>P</kbd></span>
-            </div>
-            <div class="shortcut">
-              <span>Start a new conversation</span>
-              <span class="keys" role="img" aria-label="Command, N"><kbd>⌘</kbd><kbd>N</kbd></span>
-            </div>
-            <div class="shortcut">
-              <span>Show ChatGPT, Claude, or Both</span>
-              <span class="keys" role="img" aria-label="Command, 1, 2, or 3"><kbd>⌘</kbd><kbd>1–3</kbd></span>
-            </div>
-          </div>
-        </div>
-        <ol class="steps">
-          <li>
-            <span class="step-number" aria-hidden="true">1</span>
-            <div><h3>Download</h3><p>Get <a href="https://github.com/cpoteet/Duet/releases/latest">Duet.zip from the latest release</a> and double-click it to extract the archive.</p></div>
-          </li>
-          <li>
-            <span class="step-number" aria-hidden="true">2</span>
-            <div><h3>Install</h3><p>Drag Duet.app to your Applications folder, then open it. macOS may show a standard first-open confirmation.</p></div>
-          </li>
-          <li>
-            <span class="step-number" aria-hidden="true">3</span>
-            <div><h3>Choose a workspace</h3><p>Pick ChatGPT, Claude, or Both, and sign in directly in the embedded provider page.</p></div>
-          </li>
-          <li>
-            <span class="step-number" aria-hidden="true">4</span>
-            <div><h3>Tune it</h3><p>In Duet → Settings, set a startup destination or enable Keep both providers loaded for faster switching.</p></div>
-          </li>
-        </ol>
+      <p class="section-label">Get started</p>
+      <h2 id="start-heading">Up and running in a minute.</h2>
+      <ol class="steps">
+        <li>
+          <span class="step-number" aria-hidden="true">1</span>
+          <h3>Download</h3>
+          <p>Get <a href="https://github.com/cpoteet/Duet/releases/latest">Duet.zip from the latest release</a> and double-click it to extract the app.</p>
+        </li>
+        <li>
+          <span class="step-number" aria-hidden="true">2</span>
+          <h3>Install</h3>
+          <p>Drag Duet.app to Applications and open it. macOS may ask you to confirm the first launch.</p>
+        </li>
+        <li>
+          <span class="step-number" aria-hidden="true">3</span>
+          <h3>Sign in</h3>
+          <p>Pick ChatGPT, Claude, or Both, and sign in to each provider's own page.</p>
+        </li>
+        <li>
+          <span class="step-number" aria-hidden="true">4</span>
+          <h3>Tune it</h3>
+          <p>In Duet → Settings, choose where Duet opens and how it switches.</p>
+        </li>
+      </ol>
+
+      <div class="license-note" id="license">
+        <p><strong>License.</strong> Free for any use, including paid work. You can't sell Duet or redistribute it outside the license. Duet isn't affiliated with OpenAI or Anthropic; you need your own accounts, and each provider's terms apply. <a href="https://github.com/cpoteet/Duet/blob/main/LICENSE.md">Read the license <span aria-hidden="true">→</span></a></p>
       </div>
     </section>
 
-    <section class="section container" id="license" aria-labelledby="license-heading">
-      <div class="license-panel">
-        <p class="section-label">License</p>
-        <h2 id="license-heading">Duet License</h2>
-        <p class="license-description">Free to use for any purpose, including paid work. Redistribution is limited to internal organizational use and GitHub forking under the license. Provided as is, without warranty.</p>
-        <div class="license-grid">
-          <div>
-            <h3>You can</h3>
-            <ul class="license-list allowed">
-              <li>Use it for any purpose, including paid work</li>
-              <li>Read, change, and build the source for yourself</li>
-              <li>Share your build inside your own organization</li>
-              <li>Fork it on GitHub to propose changes</li>
-            </ul>
-          </div>
-          <div>
-            <h3>You can't</h3>
-            <ul class="license-list restricted">
-              <li>Sell it, or charge to host, install, or support it</li>
-              <li>Distribute it beyond the license's permitted uses</li>
-              <li>Remove copyright notices or claim it as your own</li>
-              <li>Use Duet's name or branding for another product</li>
-            </ul>
-          </div>
-          <div>
-            <h3>ChatGPT and Claude</h3>
-            <ul class="license-list providers">
-              <li>Not affiliated with or endorsed by OpenAI or Anthropic</li>
-              <li>Each provider’s terms still apply to your use</li>
-              <li>You need your own provider accounts</li>
-            </ul>
-          </div>
+    <section class="closing" aria-labelledby="closing-heading">
+      <div class="container closing-inner">
+        <img class="closing-icon" src="assets/duet-icon-256.webp" alt="" width="96" height="96" loading="lazy">
+        <h2 id="closing-heading">Try Duet <span data-version="short">2.2</span>.</h2>
+        <p>Free for Apple Silicon Macs running macOS 27 or later.</p>
+        <div class="hero-actions">
+          <a class="button button-primary" href="https://github.com/cpoteet/Duet/releases/latest">Download Duet</a>
+          <a class="button button-secondary" data-release-notes href="https://github.com/cpoteet/Duet/releases/tag/v2.2.0"><span>What's new in <span data-version="short">2.2</span></span></a>
         </div>
-        <a class="license-link" href="https://github.com/cpoteet/Duet/blob/main/LICENSE.md">Read the full license <span aria-hidden="true">→</span></a>
       </div>
     </section>
   </main>
@@ -160,7 +159,7 @@
   <footer class="site-footer container">
     <div class="footer-content">
       <span>© 2026 Chris Poteet · Use at your own risk.</span>
-      <nav aria-label="Footer navigation"><a href="https://github.com/cpoteet/Duet">GitHub</a><a href="https://github.com/cpoteet/Duet/releases">Releases</a></nav>
+      <nav aria-label="Footer navigation"><a href="https://github.com/cpoteet/Duet">GitHub</a><a href="https://github.com/cpoteet/Duet/releases">Releases</a><a href="https://github.com/cpoteet/Duet/blob/main/LICENSE.md">License</a></nav>
     </div>
   </footer>
 </body>

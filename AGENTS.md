@@ -15,7 +15,7 @@ Duet is a personal Apple Silicon macOS 27+ app for using ChatGPT and Claude in a
 - Keep Swift source in `Sources/`, bundle resources in `Resources/`, and tests and fixtures in `Tests/`.
 - Build with `./build.sh`. It closes a running Duet instance, compiles using the local `swiftc` toolchain, assembles `dist/Duet.app`, signs it ad-hoc by default or with the configured identity, then launches the fresh build.
 - Test with `./test.sh`.
-- Release with `./release.sh`. It builds without launching, signs with Developer ID and hardened runtime, notarizes, staples, and calls `./package.sh` to create the ignored `Duet.zip` release asset with `Duet.app` and `LICENSE.md` at the archive root.
+- Release with `./release.sh`. It first runs `./site-version.sh` to set the version shown on the site from `Info.plist`, then builds without launching, signs with Developer ID and hardened runtime, notarizes, staples, and calls `./package.sh` to create the ignored `Duet.zip` release asset with `Duet.app` and `LICENSE.md` at the archive root. `./test.sh` runs `./site-version.sh --check` so a stale site version fails the tests.
 - Before handing off a release, verify the app bundle metadata, Developer ID signature, notarization ticket, and Gatekeeper assessment, then smoke-test the built app when practical.
 - Keep `CFBundleShortVersionString` and `CFBundleVersion` aligned for each release; `build.sh` also enforces the marketing version in the assembled bundle.
 - Update notices read the latest published full GitHub Release. Tag production releases as `vX.Y.Z` and mark the intended release as Latest; drafts and prereleases do not notify, and clients predating the update checker require one manual upgrade.

@@ -79,4 +79,6 @@ if [[ "$BUILD_VERSION" != "$MARKETING_VERSION" ]]; then
   exit 1
 fi
 
+"$ROOT/site-version.sh" --check
+
 echo "Bundle metadata tests passed."

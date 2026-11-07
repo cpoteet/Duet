@@ -197,42 +197,30 @@ private struct QuickPromptView: View {
             && !appState.hasActiveOperations
     }
 
-    private func send(to target: QuickPromptTarget) {
+    private func send(to target: PromptTarget) {
         let text = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
         let submittedRevision = promptRevision
         guard !text.isEmpty else { return }
 
         let drawerDraft = appState.capturePromptDraft()
-        guard appState.openQuickPromptWorkspace(for: target.promptTarget) else { return }
+        guard appState.openQuickPromptWorkspace(for: target) else { return }
         dismiss()
         revealWorkspace()
 
         Task {
-            guard await appState.waitForQuickPromptWorkspaceMount(for: target.promptTarget) else {
-                appState.reportQuickPromptWorkspaceUnavailable(for: target.promptTarget)
+            guard await appState.waitForQuickPromptWorkspaceMount(for: target) else {
+                appState.reportQuickPromptWorkspaceUnavailable(for: target)
                 return
             }
             let results = await appState.send(
                 prompt: text,
-                to: target.promptTarget,
+                to: target,
                 startingNewConversations: true
             )
             appState.collapseEmptyPromptDrawer(after: results, ifUnchanged: drawerDraft)
             if !results.isEmpty && results.allSatisfy(\.wasSent), promptRevision == submittedRevision {
                 prompt = ""
             }
-        }
-    }
-}
-
-private enum QuickPromptTarget {
-    case service(ChatService)
-    case both
-
-    var promptTarget: PromptTarget {
-        switch self {
-        case .service(let service): .service(service)
-        case .both: .both
         }
     }
 }

@@ -75,7 +75,7 @@ final class NotificationBridge: NSObject {
         let script = WKUserScript(
             source: NotificationScript.source(
                 initialPermission: presenter.cachedPermission,
-                allowedHosts: service.webNotificationHosts
+                allowedHosts: service.providerPageHosts
             ),
             injectionTime: .atDocumentStart,
             forMainFrameOnly: true
@@ -84,7 +84,7 @@ final class NotificationBridge: NSObject {
         let responseWatcher = WKUserScript(
             source: NotificationScript.responseWatcherSource(
                 adapter: ProviderAdapter.adapter(for: service),
-                allowedHosts: service.webNotificationHosts
+                allowedHosts: service.providerPageHosts
             ),
             injectionTime: .atDocumentEnd,
             forMainFrameOnly: true
@@ -108,7 +108,7 @@ extension NotificationBridge: WKScriptMessageHandlerWithReply {
             isMainFrame: message.frameInfo.isMainFrame,
             scheme: origin.protocol,
             host: origin.host,
-            allowedHosts: service.webNotificationHosts
+            allowedHosts: service.providerPageHosts
         ) else { return (nil, nil) }
         guard let parsed = NotificationBridgeMessage(body: message.body) else { return (nil, nil) }
         switch parsed {

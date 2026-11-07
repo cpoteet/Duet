@@ -11,6 +11,7 @@ xcrun swiftc \
   -strict-concurrency=complete \
   -warnings-as-errors \
   "$ROOT/Sources/Domain.swift" \
+  "$ROOT/Sources/JavaScriptLiteral.swift" \
   "$ROOT/Sources/UpdateChecker.swift" \
   "$ROOT/Sources/ProviderAdapter.swift" \
   "$ROOT/Sources/NotificationScript.swift" \
@@ -33,6 +34,7 @@ xcrun swiftc \
   -framework CoreLocation \
   -framework UserNotifications \
   "$ROOT/Sources/Domain.swift" \
+  "$ROOT/Sources/JavaScriptLiteral.swift" \
   "$ROOT/Sources/UpdateChecker.swift" \
   "$ROOT/Sources/ProviderAdapter.swift" \
   "$ROOT/Sources/NotificationScript.swift" \

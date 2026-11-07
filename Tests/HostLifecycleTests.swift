@@ -181,7 +181,7 @@ struct HostLifecycleTests {
                 isMainFrame: true,
                 scheme: "https",
                 host: "chatgpt.com",
-                allowedHosts: ChatService.chatGPT.webNotificationHosts
+                allowedHosts: ChatService.chatGPT.providerPageHosts
             ),
             "A provider main-frame origin should reach its notification bridge"
         )
@@ -190,7 +190,7 @@ struct HostLifecycleTests {
                 isMainFrame: false,
                 scheme: "https",
                 host: "chatgpt.com",
-                allowedHosts: ChatService.chatGPT.webNotificationHosts
+                allowedHosts: ChatService.chatGPT.providerPageHosts
             ),
             "A provider subframe must not reach the notification bridge"
         )
@@ -199,7 +199,7 @@ struct HostLifecycleTests {
                 isMainFrame: true,
                 scheme: "https",
                 host: "chatgpt.com.evil.example",
-                allowedHosts: ChatService.chatGPT.webNotificationHosts
+                allowedHosts: ChatService.chatGPT.providerPageHosts
             ),
             "A spoofed provider suffix must not reach the notification bridge"
         )
@@ -208,7 +208,7 @@ struct HostLifecycleTests {
                 isMainFrame: true,
                 scheme: "http",
                 host: "chatgpt.com",
-                allowedHosts: ChatService.chatGPT.webNotificationHosts
+                allowedHosts: ChatService.chatGPT.providerPageHosts
             ),
             "A non-HTTPS provider origin must not reach the notification bridge"
         )
@@ -724,6 +724,13 @@ struct HostLifecycleTests {
         } else {
             failures.append("A real navigation failure must remain visible after download classification")
         }
+        let supersededBrowser = BrowserController(service: .chatGPT)
+        supersededBrowser.beginProvisionalNavigation()
+        supersededBrowser.handleNavigationFailure(URLError(.cancelled))
+        expect(
+            supersededBrowser.phase == .loading,
+            "A navigation cancelled because another one replaced it must not show a failure"
+        )
         let timedOutBrowser = BrowserController(service: .claude)
         timedOutBrowser.handleNavigationFailure(URLError(.timedOut))
         expect(
@@ -1058,6 +1065,7 @@ struct HostLifecycleTests {
             try await testRepeatedPromptConfirmation(failures: &failures)
             try await testExistingDraftProtection(failures: &failures)
             try await testSignedOutFixture(failures: &failures)
+            try await testClaudePageChecks(failures: &failures)
             try await testClaudeFileDropCompatibility(failures: &failures)
             try await testPrintingBridgeFixture(failures: &failures)
             try await testLocationBridgeFixture(failures: &failures)
@@ -1551,6 +1559,35 @@ struct HostLifecycleTests {
     }
 
     @MainActor
+    private static func testClaudePageChecks(failures: inout [String]) async throws {
+        let adapter = ProviderAdapter.adapter(for: .claude)
+        guard let challengeScript = adapter.verificationChallengeScript(),
+              let blankScript = adapter.blankPageScript() else {
+            failures.append("Claude page checks were not configured")
+            return
+        }
+        let pages: [(name: String, html: String, isChallenge: Bool, isBlank: Bool)] = [
+            ("app", "<html><head><title>Claude</title></head><body><main><textarea></textarea></main></body></html>", false, false),
+            ("interstitial title", "<html><head><title>Just a moment...</title></head><body><p>Checking your browser</p></body></html>", true, false),
+            ("challenge markup", "<html><body><div id=\"challenge-error-text\"></div></body></html>", true, true),
+            ("cookie notice", "<html><body><p>Enable JavaScript and cookies to continue</p></body></html>", true, false),
+            ("blank", "<html><head></head><body></body></html>", false, true)
+        ]
+        for page in pages {
+            let (webView, loader) = makeFixtureWebView()
+            defer {
+                webView.navigationDelegate = nil
+                webView.stopLoading()
+            }
+            try await loader.loadHTML(page.html, baseURL: ChatService.claude.startURL, in: webView)
+            let isChallenge: Bool = try await evaluate(challengeScript, in: webView)
+            let isBlank: Bool = try await evaluate(blankScript, in: webView)
+            expect(isChallenge == page.isChallenge, "Claude \(page.name) page challenge check returned \(isChallenge)", failures: &failures)
+            expect(isBlank == page.isBlank, "Claude \(page.name) page blank check returned \(isBlank)", failures: &failures)
+        }
+    }
+
+    @MainActor
     private static func testClaudeFileDropCompatibility(failures: inout [String]) async throws {
         let configuration = WKWebViewConfiguration()
         guard let source = ProviderAdapter.adapter(for: .claude).fileDropCompatibilityScript() else {
@@ -1973,7 +2010,7 @@ struct HostLifecycleTests {
         let watcher = WKUserScript(
             source: NotificationScript.responseWatcherSource(
                 adapter: ProviderAdapter.adapter(for: service),
-                allowedHosts: service.webNotificationHosts,
+                allowedHosts: service.providerPageHosts,
                 pollIntervalMilliseconds: 50,
                 minimumGenerationMilliseconds: 200
             ),

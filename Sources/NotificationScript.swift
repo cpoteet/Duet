@@ -81,12 +81,12 @@ enum NotificationScript {
           if (window.__duetNotificationBridgeInstalled) return;
           const bridge = window.webkit?.messageHandlers?.\(handlerName);
           if (!bridge) return;
-          const allowedHosts = \(jsonArray(allowedHosts));
+          const allowedHosts = \(JavaScriptLiteral.array(allowedHosts));
           const host = (location.hostname || "").toLowerCase();
           if (!allowedHosts.some(domain => host === domain || host.endsWith("." + domain))) return;
           window.__duetNotificationBridgeInstalled = true;
 
-          let permission = \(jsonString(initialPermission.domValue));
+          let permission = \(JavaScriptLiteral.string(initialPermission.domValue));
           const acceptPermission = value => {
             if (value === "granted" || value === "denied" || value === "default") permission = value;
             return permission;
@@ -174,15 +174,15 @@ enum NotificationScript {
           if (window.__duetResponseWatcherInstalled) return;
           const bridge = window.webkit?.messageHandlers?.\(handlerName);
           if (!bridge) return;
-          const allowedHosts = \(jsonArray(allowedHosts));
+          const allowedHosts = \(JavaScriptLiteral.array(allowedHosts));
           const host = (location.hostname || "").toLowerCase();
           if (!allowedHosts.some(domain => host === domain || host.endsWith("." + domain))) return;
           window.__duetResponseWatcherInstalled = true;
 
-          const indicatorSelectors = \(jsonArray(adapter.generationIndicatorSelectors));
-          const composerSelectors = \(jsonArray(adapter.composerSelectors));
-          const controlScopeSelector = \(jsonString(adapter.generationControlScopeSelector));
-          const controlSelectors = \(jsonArray(adapter.generationControlSelectors));
+          const indicatorSelectors = \(JavaScriptLiteral.array(adapter.generationIndicatorSelectors));
+          const composerSelectors = \(JavaScriptLiteral.array(adapter.composerSelectors));
+          const controlScopeSelector = \(JavaScriptLiteral.string(adapter.generationControlScopeSelector));
+          const controlSelectors = \(JavaScriptLiteral.array(adapter.generationControlSelectors));
           let wasGenerating = false;
           let generatingSince = 0;
           let lastEvaluation = 0;
@@ -222,16 +222,4 @@ enum NotificationScript {
           evaluateState();
         })();
         """
-    }
-
-    private static func jsonArray(_ values: [String]) -> String {
-        guard let data = try? JSONSerialization.data(withJSONObject: values) else { return "[]" }
-        return String(decoding: data, as: UTF8.self)
-    }
-
-    private static func jsonString(_ value: String) -> String {
-        guard let data = try? JSONSerialization.data(withJSONObject: [value]) else { return "\"\"" }
-        let array = String(decoding: data, as: UTF8.self)
-        return String(array.dropFirst().dropLast())
-    }
-}
+    }}

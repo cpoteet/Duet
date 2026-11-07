@@ -19,7 +19,7 @@ final class BrowserController: NSObject, ObservableObject {
     )
     private lazy var locationBridge = LocationBridge(service: service)
     private lazy var printingBridge = PrintingBridge(service: service, presenter: self)
-    private var hasRetriedBlankInitialClaudeLoad = false
+    private var hasRetriedBlankInitialLoad = false
     // WebKit ends a main-frame navigation with error 102 after converting it
     // into a WKDownload. Preserve the page's prior phase for that exact path.
     private var phaseBeforeProvisionalNavigation: BrowserPhase?
@@ -66,7 +66,7 @@ final class BrowserController: NSObject, ObservableObject {
         newWebView.setValue(false, forKey: "drawsBackground")
         newWebView.underPageBackgroundColor = .clear
         webView = newWebView
-        hasRetriedBlankInitialClaudeLoad = false
+        hasRetriedBlankInitialLoad = false
         return newWebView
     }
 
@@ -177,17 +177,11 @@ final class BrowserController: NSObject, ObservableObject {
         let records: [WKWebsiteDataRecord] = await withCheckedContinuation { continuation in
             dataStore.fetchDataRecords(ofTypes: recordTypes) { continuation.resume(returning: $0) }
         }
-        let matches = records.filter { record in
-            let name = record.displayName.lowercased()
-            return service.websiteDataTokens.contains { name.contains($0) }
-        }
-        guard !matches.isEmpty else {
-            release()
-            _ = prepare()
-            return
-        }
-        await withCheckedContinuation { continuation in
-            dataStore.removeData(ofTypes: recordTypes, for: matches) { continuation.resume() }
+        let matches = records.filter { service.ownsWebsiteDataRecord(named: $0.displayName) }
+        if !matches.isEmpty {
+            await withCheckedContinuation { continuation in
+                dataStore.removeData(ofTypes: recordTypes, for: matches) { continuation.resume() }
+            }
         }
         release()
         _ = prepare()
@@ -233,48 +227,27 @@ final class BrowserController: NSObject, ObservableObject {
         return (try? await evaluate(adapter.loginRequiredScript(), as: Bool.self)) ?? false
     }
 
-    /// Cloudflare can complete a navigation while showing no usable app UI in an
-    /// embedded renderer. Surface that separately from a normal page failure.
+    /// Some providers can complete a navigation while showing only a bot-check
+    /// interstitial in an embedded renderer. Surface that separately from a
+    /// normal page failure.
     private func detectVerificationChallenge(in loadedWebView: WKWebView) async {
-        guard service == .claude, webView === loadedWebView else { return }
-        let script = """
-        (() => ({
-          title: document.title || '',
-          text: (document.body?.innerText || '').slice(0, 1500),
-          hasChallenge: Boolean(document.querySelector('#challenge-error-text, [data-cf-beacon], iframe[src*="challenges.cloudflare.com"]'))
-        }))()
-        """
-        guard let details = try? await evaluate(script, as: VerificationDetails.self) else { return }
-        guard webView === loadedWebView else { return }
-        let title = details.title.lowercased()
-        let text = details.text.lowercased()
-        let hasChallenge = details.hasChallenge
-        if hasChallenge || title.contains("just a moment") || text.contains("enable javascript and cookies") {
-            phase = .verificationRequired
-        }
+        guard webView === loadedWebView, let script = adapter.verificationChallengeScript() else { return }
+        guard (try? await evaluate(script, as: Bool.self)) == true, webView === loadedWebView else { return }
+        phase = .verificationRequired
     }
 
-    /// Claude can occasionally finish its first embedded navigation with an
+    /// A provider's first embedded navigation can occasionally finish with an
     /// empty root document. Retrying that one unusable result avoids requiring
     /// the user to switch away and back, while leaving normal navigation alone.
-    private func retryBlankInitialClaudeLoadIfNeeded(in loadedWebView: WKWebView) async {
-        guard service == .claude, !hasRetriedBlankInitialClaudeLoad, webView === loadedWebView else { return }
+    private func retryBlankInitialLoadIfNeeded(in loadedWebView: WKWebView) async {
+        guard !hasRetriedBlankInitialLoad, webView === loadedWebView,
+              let script = adapter.blankPageScript() else { return }
 
         try? await Task.sleep(for: .milliseconds(800))
         guard webView === loadedWebView else { return }
+        guard (try? await evaluate(script, as: Bool.self)) == true, webView === loadedWebView else { return }
 
-        let script = """
-        (() => {
-          const body = document.body;
-          const hasAppContent = Boolean(body?.innerText?.trim()) || Boolean(
-            document.querySelector('main, [role="main"], textarea, [contenteditable="true"], button, a')
-          );
-          return !hasAppContent;
-        })()
-        """
-        guard (try? await evaluate(script, as: Bool.self)) == true else { return }
-
-        hasRetriedBlankInitialClaudeLoad = true
+        hasRetriedBlankInitialLoad = true
         beginProgrammaticNavigation()
         loadedWebView.reload()
     }
@@ -304,6 +277,13 @@ final class BrowserController: NSObject, ObservableObject {
         if let restoredPhase = phaseRestoredForMainFrameDownload,
            Self.isDownloadNavigationInterruption(error) {
             phase = restoredPhase
+        } else if Self.isSupersededNavigation(error) {
+            // WebKit cancels a provisional load when another navigation
+            // replaces it, such as New Conversation during a page load. The
+            // replacement drives the phase from here, so don't show a failure.
+            // Phase tracking is kept on purpose: the replacement inherits the
+            // pre-load phase in case it turns into a main-frame download.
+            return
         } else {
             let navigationError = error as NSError
             let message = navigationError.domain == NSURLErrorDomain && navigationError.code == NSURLErrorTimedOut
@@ -377,7 +357,12 @@ final class BrowserController: NSObject, ObservableObject {
     private static func isDownloadNavigationInterruption(_ error: Error) -> Bool {
         let nsError = error as NSError
         return (nsError.domain == "WebKitErrorDomain" && nsError.code == 102)
-            || (nsError.domain == NSURLErrorDomain && nsError.code == NSURLErrorCancelled)
+            || isSupersededNavigation(error)
+    }
+
+    private static func isSupersededNavigation(_ error: Error) -> Bool {
+        let nsError = error as NSError
+        return nsError.domain == NSURLErrorDomain && nsError.code == NSURLErrorCancelled
     }
 
     private func waitForSubmission(
@@ -458,12 +443,6 @@ private enum ComposerReadiness {
 private struct ScriptResult: Decodable, Sendable {
     let ok: Bool
     let reason: String?
-}
-
-private struct VerificationDetails: Decodable, Sendable {
-    let title: String
-    let text: String
-    let hasChallenge: Bool
 }
 
 extension BrowserController: WKNavigationDelegate {
@@ -557,7 +536,7 @@ extension BrowserController: WKNavigationDelegate {
             self.completeNavigation()
             Task { @MainActor in
                 await self.detectVerificationChallenge(in: webView)
-                await self.retryBlankInitialClaudeLoadIfNeeded(in: webView)
+                await self.retryBlankInitialLoadIfNeeded(in: webView)
             }
         }
     }

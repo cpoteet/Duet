@@ -58,6 +58,12 @@ struct CoreTests {
         expect(ChatService.claude.isAuthenticationPage(URL(string: "https://accounts.google.com/signin")!), "Shared identity host should require sign-in")
         expect(ChatService.claude.isAuthenticationPage(URL(string: "https://claude.ai/login")!), "Provider login path should require sign-in")
         expect(!ChatService.chatGPT.isAuthenticationPage(URL(string: "https://chatgpt.com/c/123")!), "Conversation pages must not be classified as authentication")
+        expect(ChatService.chatGPT.ownsWebsiteDataRecord(named: "chatgpt.com"), "ChatGPT reset must remove chatgpt.com records")
+        expect(ChatService.chatGPT.ownsWebsiteDataRecord(named: "OpenAI.com"), "ChatGPT reset must match record names case-insensitively")
+        expect(ChatService.claude.ownsWebsiteDataRecord(named: "anthropic.com"), "Claude reset must remove anthropic.com records")
+        expect(!ChatService.claude.ownsWebsiteDataRecord(named: "notclaude.ai"), "Claude reset must not remove a lookalike domain")
+        expect(!ChatService.claude.ownsWebsiteDataRecord(named: "chatgpt.com"), "Claude reset must not remove ChatGPT records")
+        expect(!ChatService.chatGPT.ownsWebsiteDataRecord(named: "claude.ai"), "ChatGPT reset must not remove Claude records")
         expect(PromptDispatchOutcome.sent.wasSent, "Sent outcome must be marked sent")
         expect(!PromptDispatchOutcome.unavailable.wasSent, "Unavailable outcome must not be marked sent")
         expect(PromptDispatchOutcome.loginRequired.label == "Sign in required", "Login state must map correctly")
@@ -84,6 +90,14 @@ struct CoreTests {
             let submit = adapter.submissionScript(prompt: "test")
             let confirmation = adapter.submissionConfirmationScript(prompt: "test")
             let fileDropCompatibility = adapter.fileDropCompatibilityScript()
+            expect(
+                (adapter.verificationChallengeScript() != nil) == (service == .claude),
+                "Only Claude should check for a verification interstitial"
+            )
+            expect(
+                (adapter.blankPageScript() != nil) == (service == .claude),
+                "Only Claude should retry a blank initial load"
+            )
             expect(readiness.contains("document.querySelector"), "\(service.title) readiness script has no selector")
             expect(readiness.contains("getClientRects"), "\(service.title) readiness script accepts a hidden composer")
             expect(fill.contains("InputEvent"), "\(service.title) fill script does not notify the page")
@@ -111,14 +125,14 @@ struct CoreTests {
         for service in ChatService.allCases {
             let shim = NotificationScript.source(
                 initialPermission: .undetermined,
-                allowedHosts: service.webNotificationHosts
+                allowedHosts: service.providerPageHosts
             )
             expect(shim.contains("messageHandlers?.duetNotifications"), "\(service.title) shim does not target the bridge handler")
             expect(shim.contains("\"default\""), "\(service.title) shim does not seed the initial permission")
-            for host in service.webNotificationHosts {
+            for host in service.providerPageHosts {
                 expect(shim.contains(host), "\(service.title) shim does not restrict itself to \(host)")
             }
-            expect(!service.webNotificationHosts.isEmpty, "\(service.title) exposes no notification hosts")
+            expect(!service.providerPageHosts.isEmpty, "\(service.title) exposes no notification hosts")
         }
         expect(
             NotificationScript.source(initialPermission: .granted, allowedHosts: ["claude.ai"]).contains("\"granted\""),
@@ -160,14 +174,14 @@ struct CoreTests {
             expect(!adapter.generationIndicatorSelectors.isEmpty, "\(service.title) has no generation indicators")
             let watcher = NotificationScript.responseWatcherSource(
                 adapter: adapter,
-                allowedHosts: service.webNotificationHosts
+                allowedHosts: service.providerPageHosts
             )
             expect(watcher.contains("responseComplete"), "\(service.title) watcher does not report completions")
             expect(watcher.contains("messageHandlers?.duetNotifications"), "\(service.title) watcher does not target the bridge handler")
             for selector in adapter.generationIndicatorSelectors + adapter.generationControlSelectors {
                 expect(watcher.contains(selector), "\(service.title) watcher does not check \(selector)")
             }
-            for host in service.webNotificationHosts {
+            for host in service.providerPageHosts {
                 expect(watcher.contains(host), "\(service.title) watcher does not restrict itself to \(host)")
             }
         }

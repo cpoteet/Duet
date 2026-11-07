@@ -181,8 +181,8 @@ struct ContentView: View {
 
     private func launchChoiceColor(for destination: LaunchDestination) -> Color {
         switch destination {
-        case .chatGPT: providerColor(for: .chatGPT)
-        case .claude: providerColor(for: .claude)
+        case .chatGPT: ChatService.chatGPT.brandColor
+        case .claude: ChatService.claude.brandColor
         case .both: palette.accent
         }
     }
@@ -498,7 +498,7 @@ struct ContentView: View {
         guard nextToast.style == .success else { return }
         toastDismissal = Task { @MainActor [nextToast] in
             do {
-                try await Task.sleep(nanoseconds: 3_000_000_000)
+                try await Task.sleep(for: .seconds(3))
             } catch {
                 return
             }
@@ -519,13 +519,6 @@ struct ContentView: View {
         toastDismissal?.cancel()
         withAnimation(.easeOut(duration: 0.2)) {
             toast = nil
-        }
-    }
-
-    private func providerColor(for service: ChatService) -> Color {
-        switch service {
-        case .chatGPT: return Color(red: 0.25, green: 0.60, blue: 0.93)
-        case .claude: return Color(red: 0.92, green: 0.49, blue: 0.23)
         }
     }
 
@@ -562,46 +555,32 @@ private struct ObservedServicePane: View {
     }
 
     private func failureNotice(_ message: String) -> some View {
-        VStack(spacing: 12) {
-            Image(systemName: "exclamationmark.triangle")
-                .font(.system(size: 28))
-                .foregroundStyle(palette.secondaryText)
-            Text("\(service.title) didn't load")
-                .font(.headline)
-                .foregroundStyle(palette.primaryText)
-            Text(message)
-                .multilineTextAlignment(.center)
-                .foregroundStyle(palette.secondaryText)
-                .frame(maxWidth: 330)
-            HStack {
-                Button("Open in browser") { browser.openInDefaultBrowser() }
-                    .buttonStyle(.bordered)
-                Button("Retry here") { browser.reload() }
-                    .buttonStyle(.borderedProminent)
-            }
-        }
-        .padding(24)
-        .background {
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .fill(palette.drawer)
-                .shadow(color: .black.opacity(0.18), radius: 14, y: 5)
-        }
-        .overlay {
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .stroke(palette.border, lineWidth: 1)
-        }
-        .padding(24)
+        paneNotice(
+            systemImage: "exclamationmark.triangle",
+            tint: palette.secondaryText,
+            title: "\(service.title) didn't load",
+            message: message
+        )
     }
 
     private var verificationNotice: some View {
+        paneNotice(
+            systemImage: "exclamationmark.shield.fill",
+            tint: .orange,
+            title: "\(service.title) needs browser verification",
+            message: "The provider returned a verification page that this embedded WebKit view could not complete."
+        )
+    }
+
+    private func paneNotice(systemImage: String, tint: Color, title: String, message: String) -> some View {
         VStack(spacing: 12) {
-            Image(systemName: "exclamationmark.shield.fill")
+            Image(systemName: systemImage)
                 .font(.system(size: 28))
-                .foregroundStyle(.orange)
-            Text("\(service.title) needs browser verification")
+                .foregroundStyle(tint)
+            Text(title)
                 .font(.headline)
                 .foregroundStyle(palette.primaryText)
-            Text("The provider returned a verification page that this embedded WebKit view could not complete.")
+            Text(message)
                 .multilineTextAlignment(.center)
                 .foregroundStyle(palette.secondaryText)
                 .frame(maxWidth: 330)
@@ -743,11 +722,16 @@ private struct ProviderMark: View {
     let service: ChatService
     var size: CGFloat = 38
 
-    private var image: NSImage? {
-        let resourceName = service == .chatGPT ? "ChatGPT" : "Claude"
-        guard let url = Bundle.main.url(forResource: resourceName, withExtension: "png") else { return nil }
-        return NSImage(contentsOf: url)
-    }
+    /// Loaded once per launch; the toolbar and chooser re-render often.
+    @MainActor private static let images: [ChatService: NSImage] = Dictionary(
+        uniqueKeysWithValues: ChatService.allCases.compactMap { service in
+            Bundle.main.url(forResource: service.iconResourceName, withExtension: "png")
+                .flatMap(NSImage.init(contentsOf:))
+                .map { (service, $0) }
+        }
+    )
+
+    private var image: NSImage? { Self.images[service] }
 
     var body: some View {
         Group {
@@ -761,7 +745,7 @@ private struct ProviderMark: View {
             } else {
                 Image(systemName: service == .chatGPT ? "circle.hexagongrid.fill" : "sparkles")
                     .font(.system(size: size * 0.92, weight: .medium))
-                    .foregroundStyle(service == .chatGPT ? Color(red: 0.25, green: 0.60, blue: 0.93) : Color(red: 0.92, green: 0.49, blue: 0.23))
+                    .foregroundStyle(service.brandColor)
             }
         }
         .frame(width: size, height: size)
@@ -791,5 +775,22 @@ private struct LaunchChoiceButtonStyle: ButtonStyle {
                 y: configuration.isPressed ? 1 : 3
             )
             .scaleEffect(configuration.isPressed ? 0.985 : 1)
+    }
+}
+
+private extension ChatService {
+    /// The bundled PNG for the provider's mark (`Resources/<name>.png`).
+    var iconResourceName: String {
+        switch self {
+        case .chatGPT: "ChatGPT"
+        case .claude: "Claude"
+        }
+    }
+
+    var brandColor: Color {
+        switch self {
+        case .chatGPT: Color(red: 0.25, green: 0.60, blue: 0.93)
+        case .claude: Color(red: 0.92, green: 0.49, blue: 0.23)
+        }
     }
 }

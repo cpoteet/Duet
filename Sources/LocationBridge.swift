@@ -179,11 +179,9 @@ enum LocationScript {
     static let handlerName = "duetLocation"
 
     static func source(allowedHosts: [String]) -> String {
-        let data = try! JSONSerialization.data(withJSONObject: allowedHosts)
-        let allowedHostsJSON = String(data: data, encoding: .utf8)!
-        return """
+        """
         (() => {
-          const allowedHosts = \(allowedHostsJSON);
+          const allowedHosts = \(JavaScriptLiteral.array(allowedHosts));
           const host = (location.hostname || '').toLowerCase();
           const allowed = allowedHosts.some(domain => host === domain || host.endsWith(`.${domain}`));
           const firstPath = location.pathname.split('/').filter(Boolean)[0]?.toLowerCase();
@@ -313,7 +311,7 @@ final class LocationBridge: NSObject {
     func install(in configuration: WKWebViewConfiguration) {
         let userContentController = configuration.userContentController
         userContentController.addUserScript(WKUserScript(
-            source: LocationScript.source(allowedHosts: service.webNotificationHosts),
+            source: LocationScript.source(allowedHosts: service.providerPageHosts),
             injectionTime: .atDocumentStart,
             forMainFrameOnly: true
         ))
@@ -335,7 +333,7 @@ extension LocationBridge: WKScriptMessageHandlerWithReply {
             isMainFrame: message.frameInfo.isMainFrame,
             scheme: origin.protocol,
             host: origin.host,
-            allowedHosts: service.webNotificationHosts
+            allowedHosts: service.providerPageHosts
         ), service.allowsNativePermission(at: message.frameInfo.request.url),
            service.allowsNativePermission(at: message.webView?.url) else { return (nil, nil) }
         let requestingPageURL = message.webView?.url

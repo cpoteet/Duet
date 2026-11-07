@@ -13,7 +13,7 @@ enum PrintingScript {
           if (window.__duetPrintingBridgeInstalled) return;
           const bridge = window.webkit?.messageHandlers?.\(handlerName);
           if (!bridge) return;
-          const allowedHosts = \(jsonArray(allowedHosts));
+          const allowedHosts = \(JavaScriptLiteral.array(allowedHosts));
           const host = (location.hostname || "").toLowerCase();
           const isTopLevel = window === window.top;
           if (isTopLevel && !allowedHosts.some(domain => host === domain || host.endsWith("." + domain))) return;
@@ -101,13 +101,7 @@ enum PrintingScript {
           }, true);
         })();
         """
-    }
-
-    private static func jsonArray(_ values: [String]) -> String {
-        guard let data = try? JSONSerialization.data(withJSONObject: values) else { return "[]" }
-        return String(decoding: data, as: UTF8.self)
-    }
-}
+    }}
 
 @MainActor
 protocol WebPagePrintPresenting: AnyObject {
@@ -130,7 +124,7 @@ final class PrintingBridge: NSObject {
     func install(in configuration: WKWebViewConfiguration) {
         let userContentController = configuration.userContentController
         userContentController.addUserScript(WKUserScript(
-            source: PrintingScript.source(allowedHosts: service.webNotificationHosts),
+            source: PrintingScript.source(allowedHosts: service.providerPageHosts),
             injectionTime: .atDocumentStart,
             forMainFrameOnly: false
         ))

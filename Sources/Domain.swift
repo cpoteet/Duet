@@ -82,7 +82,10 @@ enum ChatService: String, CaseIterable, Identifiable, Hashable {
         }
     }
 
-    private var promptHosts: [String] {
+    /// The provider's own app pages: the only hosts that receive prompt
+    /// injection and the notification, location, and printing bridges.
+    /// Authentication hosts are intentionally excluded.
+    var providerPageHosts: [String] {
         switch self {
         case .chatGPT: ["chatgpt.com"]
         case .claude: ["claude.ai"]
@@ -91,8 +94,8 @@ enum ChatService: String, CaseIterable, Identifiable, Hashable {
 
     private var providerNavigationHosts: [String] {
         switch self {
-        case .chatGPT: promptHosts + ["openai.com"]
-        case .claude: promptHosts + ["anthropic.com"]
+        case .chatGPT: providerPageHosts + ["openai.com"]
+        case .claude: providerPageHosts + ["anthropic.com"]
         }
     }
 
@@ -112,10 +115,6 @@ enum ChatService: String, CaseIterable, Identifiable, Hashable {
         ]
     }
 
-    /// Hosts whose pages may use the injected Notification API bridge.
-    /// Authentication hosts are intentionally excluded.
-    var webNotificationHosts: [String] { promptHosts }
-
     func allowsNavigation(to url: URL) -> Bool {
         guard let scheme = url.scheme?.lowercased() else { return false }
         if scheme == "about" { return true }
@@ -125,7 +124,7 @@ enum ChatService: String, CaseIterable, Identifiable, Hashable {
 
     func allowsPromptInjection(at url: URL?) -> Bool {
         guard url?.scheme?.lowercased() == "https", let host = url?.host?.lowercased() else { return false }
-        return promptHosts.contains { hostMatches(host, domain: $0) }
+        return providerPageHosts.contains { hostMatches(host, domain: $0) }
     }
 
     func allowsNativePermission(at url: URL?) -> Bool {
@@ -135,7 +134,7 @@ enum ChatService: String, CaseIterable, Identifiable, Hashable {
     func allowsMediaCapture(originProtocol: String, host: String) -> Bool {
         guard originProtocol.lowercased() == "https" else { return false }
         let normalizedHost = host.lowercased()
-        return promptHosts.contains { hostMatches(normalizedHost, domain: $0) }
+        return providerPageHosts.contains { hostMatches(normalizedHost, domain: $0) }
     }
 
     func isAuthenticationPage(_ url: URL?) -> Bool {
@@ -143,7 +142,7 @@ enum ChatService: String, CaseIterable, Identifiable, Hashable {
         if (providerAuthenticationHosts + authenticationHosts).contains(where: { hostMatches(host, domain: $0) }) {
             return true
         }
-        guard promptHosts.contains(where: { hostMatches(host, domain: $0) }) else { return false }
+        guard providerPageHosts.contains(where: { hostMatches(host, domain: $0) }) else { return false }
         guard let firstPathComponent = url?.path.split(separator: "/").first?.lowercased() else { return false }
         return ["auth", "login", "signin", "sign-in"].contains(firstPathComponent)
     }
@@ -152,12 +151,20 @@ enum ChatService: String, CaseIterable, Identifiable, Hashable {
         host == domain || host.hasSuffix(".\(domain)")
     }
 
-    /// Tokens used only to find the matching persistent WebKit records during reset.
-    var websiteDataTokens: [String] {
+    /// Domains whose persistent WebKit records belong to this provider.
+    var websiteDataDomains: [String] {
         switch self {
         case .chatGPT: ["chatgpt.com", "openai.com"]
         case .claude: ["claude.ai", "anthropic.com"]
         }
+    }
+
+    /// Matches a `WKWebsiteDataRecord.displayName`, which WebKit reports as a
+    /// registrable domain, against this provider's domains. A plain substring
+    /// match would also claim unrelated sites such as `notclaude.ai`.
+    func ownsWebsiteDataRecord(named displayName: String) -> Bool {
+        let name = displayName.lowercased()
+        return websiteDataDomains.contains { hostMatches(name, domain: $0) }
     }
 }
 

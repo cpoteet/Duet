@@ -10,6 +10,12 @@ struct ProviderAdapter {
     /// A provider-owned file input used to bridge WebKit file drops through
     /// the same upload path as the provider's working file picker.
     let fileDropInputSelector: String?
+    /// The provider sits behind an interstitial bot check (Cloudflare) that
+    /// can finish loading without showing usable app UI in an embedded view.
+    let detectsVerificationChallenge: Bool
+    /// The provider's first embedded load can finish with an empty document,
+    /// so one automatic reload is allowed.
+    let retriesBlankInitialLoad: Bool
 
     static func adapter(for service: ChatService) -> ProviderAdapter {
         switch service {
@@ -33,7 +39,9 @@ struct ProviderAdapter {
                 ],
                 generationControlScopeSelector: "[class*='ComposerLayoutRoot-'], form",
                 generationControlSelectors: ["button[aria-label^='Stop' i]"],
-                fileDropInputSelector: nil
+                fileDropInputSelector: nil,
+                detectsVerificationChallenge: false,
+                retriesBlankInitialLoad: false
             )
         case .claude:
             ProviderAdapter(
@@ -55,7 +63,9 @@ struct ProviderAdapter {
                 ],
                 generationControlScopeSelector: ".relative.w-full.min-w-0, form",
                 generationControlSelectors: ["button[aria-label^='Stop' i]"],
-                fileDropInputSelector: "input[type='file'][data-testid='file-upload']"
+                fileDropInputSelector: "input[type='file'][data-testid='file-upload']",
+                detectsVerificationChallenge: true,
+                retriesBlankInitialLoad: true
             )
         }
     }
@@ -66,7 +76,7 @@ struct ProviderAdapter {
     /// user-initiated file drops through that same provider-owned input.
     func fileDropCompatibilityScript() -> String? {
         guard let fileDropInputSelector else { return nil }
-        let encodedSelector = jsonString(fileDropInputSelector)
+        let encodedSelector = JavaScriptLiteral.string(fileDropInputSelector)
         return """
         (() => {
           const hostname = location.hostname.toLowerCase();
@@ -117,12 +127,60 @@ struct ProviderAdapter {
         """
     }
 
+    /// Returns `true` when the loaded page is a bot-check interstitial rather
+    /// than the provider's app, or `nil` when this provider has none.
+    func verificationChallengeScript() -> String? {
+        guard detectsVerificationChallenge else { return nil }
+        return """
+        (() => {
+          const title = (document.title || '').toLowerCase();
+          const text = (document.body?.innerText || '').slice(0, 1500).toLowerCase();
+          const hasChallenge = Boolean(document.querySelector('#challenge-error-text, [data-cf-beacon], iframe[src*="challenges.cloudflare.com"]'));
+          return hasChallenge || title.includes('just a moment') || text.includes('enable javascript and cookies');
+        })()
+        """
+    }
+
+    /// Returns `true` when the loaded document has no app content at all, or
+    /// `nil` when this provider doesn't retry blank loads.
+    func blankPageScript() -> String? {
+        guard retriesBlankInitialLoad else { return nil }
+        return """
+        (() => {
+          const hasAppContent = Boolean(document.body?.innerText?.trim()) || Boolean(
+            document.querySelector('main, [role="main"], textarea, [contenteditable="true"], button, a')
+          );
+          return !hasAppContent;
+        })()
+        """
+    }
+
+    /// Page-side helper: an element counts only when it is rendered and not
+    /// inside an `aria-hidden` subtree.
+    private static let visibilityHelper = """
+        const isVisible = element => element && element.getClientRects().length > 0 && !element.closest('[aria-hidden="true"]');
+        """
+
+    /// Page-side helpers that find the first visible composer and read its
+    /// text, whether it is a form control or a contenteditable editor.
+    private var composerHelpers: String {
+        """
+        \(Self.visibilityHelper)
+                  const composerSelectors = \(JavaScriptLiteral.array(composerSelectors));
+                  const findComposer = () => composerSelectors
+                    .flatMap(selector => Array.from(document.querySelectorAll(selector)))
+                    .find(isVisible);
+                  const composerText = composer => composer instanceof HTMLTextAreaElement || composer instanceof HTMLInputElement
+                    ? composer.value
+                    : composer.innerText || composer.textContent || '';
+        """
+    }
+
     func readinessScript() -> String {
         """
         (() => {
-          const composerSelectors = \(jsonArray(composerSelectors));
-          const isVisible = element => element && element.getClientRects().length > 0 && !element.closest('[aria-hidden="true"]');
-          return composerSelectors.flatMap(selector => Array.from(document.querySelectorAll(selector))).some(isVisible);
+          \(composerHelpers)
+          return Boolean(findComposer());
         })()
         """
     }
@@ -130,7 +188,7 @@ struct ProviderAdapter {
     func loginRequiredScript() -> String {
         """
         (() => {
-          const isVisible = element => element && element.getClientRects().length > 0 && !element.closest('[aria-hidden="true"]');
+          \(Self.visibilityHelper)
           const normalize = text => text.replace(/\\s+/g, ' ').trim().toLowerCase();
           const loginLabels = new Set([
             'log in', 'login', 'sign in', 'sign in with google', 'continue with google',
@@ -148,19 +206,14 @@ struct ProviderAdapter {
     }
 
     func fillScript(prompt: String) -> String {
-        let encodedPrompt = jsonString(prompt)
+        let encodedPrompt = JavaScriptLiteral.string(prompt)
         return """
         (() => {
           const prompt = \(encodedPrompt);
-          const composerSelectors = \(jsonArray(composerSelectors));
-          const isVisible = element => element && element.getClientRects().length > 0 && !element.closest('[aria-hidden="true"]');
-          const composer = composerSelectors.flatMap(selector => Array.from(document.querySelectorAll(selector))).find(isVisible);
+          \(composerHelpers)
+          const composer = findComposer();
           if (!composer) return { ok: false, reason: 'composer-not-found' };
-
-          const existingText = composer instanceof HTMLTextAreaElement || composer instanceof HTMLInputElement
-            ? composer.value
-            : composer.innerText || composer.textContent || '';
-          if (existingText.trim().length > 0) return { ok: false, reason: 'composer-not-empty' };
+          if (composerText(composer).trim().length > 0) return { ok: false, reason: 'composer-not-empty' };
 
           composer.focus();
           if (composer instanceof HTMLTextAreaElement || composer instanceof HTMLInputElement) {
@@ -191,20 +244,15 @@ struct ProviderAdapter {
     }
 
     func submissionScript(prompt: String) -> String {
-        let encodedPrompt = jsonString(prompt)
+        let encodedPrompt = JavaScriptLiteral.string(prompt)
         return """
         (() => {
           const normalize = text => text.replace(/\\s+/g, ' ').trim();
           const prompt = normalize(\(encodedPrompt));
-          const composerSelectors = \(jsonArray(composerSelectors));
-          const sendButtonSelectors = \(jsonArray(sendButtonSelectors));
-          const isVisible = element => element && element.getClientRects().length > 0 && !element.closest('[aria-hidden="true"]');
-          const composer = composerSelectors.flatMap(selector => Array.from(document.querySelectorAll(selector))).find(isVisible);
-          if (!composer) return { ok: false, reason: 'composer-missing-prompt' };
-          const text = composer instanceof HTMLTextAreaElement || composer instanceof HTMLInputElement
-            ? composer.value
-            : composer.innerText || composer.textContent || '';
-          if (normalize(text) !== prompt) return { ok: false, reason: 'composer-missing-prompt' };
+          const sendButtonSelectors = \(JavaScriptLiteral.array(sendButtonSelectors));
+          \(composerHelpers)
+          const composer = findComposer();
+          if (!composer || normalize(composerText(composer)) !== prompt) return { ok: false, reason: 'composer-missing-prompt' };
           const buttons = sendButtonSelectors.flatMap(selector => Array.from(document.querySelectorAll(selector)));
           const sendButton = buttons.find(button =>
             isVisible(button) && !button.disabled && button.getAttribute('aria-disabled') !== 'true'
@@ -217,31 +265,16 @@ struct ProviderAdapter {
     }
 
     func submissionConfirmationScript(prompt: String) -> String {
-        let encodedPrompt = jsonString(prompt)
+        let encodedPrompt = JavaScriptLiteral.string(prompt)
         return """
         (() => {
           const normalize = text => text.replace(/\\s+/g, ' ').trim();
           const prompt = normalize(\(encodedPrompt));
-          const composerSelectors = \(jsonArray(composerSelectors));
-          const isVisible = element => element && element.getClientRects().length > 0 && !element.closest('[aria-hidden="true"]');
-          const composer = composerSelectors.flatMap(selector => Array.from(document.querySelectorAll(selector))).find(isVisible);
+          \(composerHelpers)
+          const composer = findComposer();
           if (!composer) return false;
-          const text = composer instanceof HTMLTextAreaElement || composer instanceof HTMLInputElement
-            ? composer.value
-            : composer.innerText || composer.textContent || '';
-          return prompt.length > 0 && normalize(text).length === 0;
+          return prompt.length > 0 && normalize(composerText(composer)).length === 0;
         })()
         """
-    }
-
-    private func jsonArray(_ values: [String]) -> String {
-        guard let data = try? JSONSerialization.data(withJSONObject: values) else { return "[]" }
-        return String(decoding: data, as: UTF8.self)
-    }
-
-    private func jsonString(_ value: String) -> String {
-        guard let data = try? JSONSerialization.data(withJSONObject: [value]) else { return "\"\"" }
-        let array = String(decoding: data, as: UTF8.self)
-        return String(array.dropFirst().dropLast())
     }
 }

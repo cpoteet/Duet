@@ -25,8 +25,23 @@ final class DuetApplicationDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    func showQuickPrompt() {
+    @objc func showQuickPrompt() {
         quickPrompt?.show()
+    }
+
+    /// Adds Quick Prompt to the Dock icon's menu, above the system items.
+    func applicationDockMenu(_ sender: NSApplication) -> NSMenu? {
+        guard quickPrompt != nil else { return nil }
+
+        let menu = NSMenu()
+        let item = NSMenuItem(
+            title: "Quick Prompt",
+            action: #selector(showQuickPrompt),
+            keyEquivalent: ""
+        )
+        item.target = self
+        menu.addItem(item)
+        return menu
     }
 
     /// Brings the workspace forward for surfaces outside the workspace window,
@@ -58,7 +73,9 @@ private final class QuickPromptPanelController: NSObject, NSWindowDelegate {
         self.reopenWorkspace = reopenWorkspace
         panel = NSPanel(
             contentRect: NSRect(x: 0, y: 0, width: 500, height: 212),
-            styleMask: [.titled, .closable, .fullSizeContentView, .utilityWindow],
+            // Non-activating, so the panel can take the keyboard without
+            // bringing the workspace forward. Must be set at creation.
+            styleMask: [.titled, .closable, .fullSizeContentView, .utilityWindow, .nonactivatingPanel],
             backing: .buffered,
             defer: false
         )
@@ -69,6 +86,8 @@ private final class QuickPromptPanelController: NSObject, NSWindowDelegate {
         panel.level = .floating
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         panel.isReleasedWhenClosed = false
+        // A panel that hides on deactivate never appears while Duet is inactive.
+        panel.hidesOnDeactivate = false
         panel.delegate = self
         panel.contentViewController = NSHostingController(
             rootView: QuickPromptView(appState: appState) { [weak self] in
@@ -78,14 +97,39 @@ private final class QuickPromptPanelController: NSObject, NSWindowDelegate {
             }
         )
         panel.center()
+
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(hideIfDuetIsInactive),
+            name: NSApplication.didResignActiveNotification,
+            object: nil
+        )
     }
 
+    /// Shows only the panel. The workspace stays where it is until a prompt
+    /// is sent.
     func show() {
         panel.center()
-        NSApp.activate(ignoringOtherApps: true)
+        // A hidden app can't show any window, so unhiding is unavoidable.
+        if NSApp.isHidden {
+            NSApp.activate(ignoringOtherApps: true)
+        }
         DispatchQueue.main.async { [weak panel] in
             panel?.makeKeyAndOrderFront(nil)
         }
+    }
+
+    /// The panel no longer hides with the app, so put it away when the user
+    /// clicks elsewhere instead of leaving it floating over other apps.
+    func windowDidResignKey(_ notification: Notification) {
+        DispatchQueue.main.async { [weak self] in
+            self?.hideIfDuetIsInactive()
+        }
+    }
+
+    @objc private func hideIfDuetIsInactive() {
+        guard !NSApp.isActive, !panel.isKeyWindow else { return }
+        panel.orderOut(nil)
     }
 
     private func dismiss() {

@@ -43,7 +43,7 @@ The drawer handles text only. For attachments and provider-specific tools, use t
 
 ## Quick Prompt
 
-Press Control-Option-Space in any app to open Quick Prompt, or choose Tools → Quick Prompt while Duet is in front. Type a prompt and send it to ChatGPT, Claude, or Both. Each provider you pick gets a brand-new conversation, and Duet brings its window forward so you can keep going. That includes reopening the window if you closed it or bringing it back if it was minimized.
+Press Control-Option-Space in any app to open Quick Prompt, or choose Tools → Quick Prompt while Duet is in front. While Duet is running, you can also right-click its Dock icon and choose Quick Prompt. Type a prompt and send it to ChatGPT, Claude, or Both. Each provider you pick gets a brand-new conversation, and Duet brings its window forward so you can keep going. That includes reopening the window if you closed it or bringing it back if it was minimized.
 
 ## Notifications
 

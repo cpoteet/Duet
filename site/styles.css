@@ -184,7 +184,15 @@ kbd { display: inline-block; font-family: var(--mono); font-size: 0.8em; font-we
 .lead { font-size: 19px; line-height: 1.6; margin: 0; max-width: 560px; }
 .lead kbd { font-size: 15px; }
 .lead-note { color: var(--muted); font-size: 15px; margin: 12px 0 0; max-width: 560px; }
-.demo { margin: 48px 0 0; }
+/* Size the demo by the window's height as well as its width, so the whole video and its steps
+   fit on screen together under the sticky header. 1.6293 is the video's aspect ratio, and the
+   chrome is the header plus the steps row. */
+.demo {
+  --demo-chrome: 200px;
+  width: min(100%, max(520px, calc((100vh - var(--demo-chrome)) * 1.6293)));
+  width: min(100%, max(520px, calc((100svh - var(--demo-chrome)) * 1.6293)));
+  margin: 48px auto 0;
+}
 .demo-stage { position: relative; }
 .demo-video {
   display: block;
@@ -216,16 +224,33 @@ kbd { display: inline-block; font-family: var(--mono); font-size: 0.8em; font-we
 
 /* Steps under the demo. A plain list until the video plays; then the current step lights up
    and a bar along its top edge tracks the step's progress. */
-.demo-steps { list-style: none; margin: 24px 0 0; padding: 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px 32px; counter-reset: demo-step; }
-.demo-steps li { position: relative; padding-top: 16px; border-top: 2px solid var(--border); counter-increment: demo-step; transition: opacity 240ms var(--ease); }
+.demo-steps { list-style: none; margin: 24px 0 0; padding: 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px 32px; }
+.demo-steps li { position: relative; padding-top: 16px; border-top: 2px solid var(--border); transition: opacity 240ms var(--ease); }
 .demo-steps li::before { content: ""; position: absolute; top: -2px; left: 0; height: 2px; width: calc(var(--step-progress, 0) * 100%); background: var(--accent); }
 .demo-step-name { display: block; font-weight: 600; font-size: 17px; }
-.demo-step-name::before { content: counter(demo-step, decimal-leading-zero); font-family: var(--mono); font-size: 13px; font-weight: 400; color: var(--subtle); margin-right: 10px; }
 .demo-step-text { display: block; color: var(--muted); font-size: 15px; line-height: 1.5; margin-top: 4px; }
 .demo-step-text kbd { font-size: 13px; }
 .demo-steps[data-playing] li { opacity: 0.45; }
 .demo-steps[data-playing] li.is-current { opacity: 1; }
-.demo-steps[data-playing] li.is-current .demo-step-name::before { color: var(--accent); }
+
+/* Short, wide windows: the steps move beside the video, which then gets the full height.
+   Taller windows keep them underneath, where the video can fill the band. */
+@media (min-width: 861px) and (max-height: 760px) {
+  .demo {
+    --demo-chrome: 150px;
+    --demo-steps-width: 200px;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) var(--demo-steps-width);
+    gap: 32px;
+    align-items: center;
+    width: min(100%, max(600px, calc((100vh - var(--demo-chrome)) * 1.6293 + var(--demo-steps-width) + 32px)));
+    width: min(100%, max(600px, calc((100svh - var(--demo-chrome)) * 1.6293 + var(--demo-steps-width) + 32px)));
+  }
+  .demo-steps { grid-template-columns: 1fr; margin: 0; gap: 12px; }
+  /* Beside the video the progress bar runs down each step's left edge. */
+  .demo-steps li { padding: 6px 0 6px 20px; border-top: 0; border-left: 2px solid var(--border); }
+  .demo-steps li::before { top: 0; left: -2px; width: 2px; height: calc(var(--step-progress, 0) * 100%); }
+}
 
 /* Features */
 .section { padding-top: 112px; }

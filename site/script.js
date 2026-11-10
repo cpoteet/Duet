@@ -59,8 +59,58 @@ if (demo && demoToggle) {
     demo.play().catch(() => syncToggle());
   };
 
+  // Step labels follow the video while it plays. Paused (including offscreen and the
+  // reduced-motion start), they go back to a plain list.
+  const stepList = document.querySelector('.demo-steps');
+  const steps = stepList ? [...stepList.querySelectorAll('li')].map((li) => ({ li, start: Number(li.dataset.start) })) : [];
+  let stepFrame = 0;
+
+  const syncSteps = () => {
+    const time = demo.currentTime;
+    const end = demo.duration || 0;
+    let current = 0;
+    steps.forEach((step, index) => { if (time >= step.start) current = index; });
+    steps.forEach((step, index) => {
+      const isCurrent = index === current;
+      step.li.classList.toggle('is-current', isCurrent);
+      if (isCurrent) step.li.setAttribute('aria-current', 'step');
+      else step.li.removeAttribute('aria-current');
+      if (reduceMotion.matches) return;
+      const stepEnd = steps[index + 1]?.start ?? end;
+      let progress = index < current ? 1 : 0;
+      if (isCurrent && stepEnd > step.start) progress = Math.min(1, (time - step.start) / (stepEnd - step.start));
+      step.li.style.setProperty('--step-progress', progress);
+    });
+  };
+
+  const tick = () => {
+    syncSteps();
+    stepFrame = requestAnimationFrame(tick);
+  };
+
+  const startSteps = () => {
+    if (!stepList) return;
+    stepList.setAttribute('data-playing', '');
+    cancelAnimationFrame(stepFrame);
+    tick();
+  };
+
+  const stopSteps = () => {
+    if (!stepList) return;
+    cancelAnimationFrame(stepFrame);
+    stepList.removeAttribute('data-playing');
+    for (const { li } of steps) {
+      li.classList.remove('is-current');
+      li.removeAttribute('aria-current');
+      li.style.removeProperty('--step-progress');
+    }
+  };
+
   demo.addEventListener('play', syncToggle);
   demo.addEventListener('pause', syncToggle);
+  demo.addEventListener('playing', startSteps);
+  demo.addEventListener('pause', stopSteps);
+  demo.addEventListener('timeupdate', () => { if (!demo.paused) syncSteps(); });
 
   demoToggle.addEventListener('click', () => {
     if (demo.paused) {

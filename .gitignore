@@ -14,3 +14,6 @@ tmp/
 
 # Finder metadata
 .DS_Store
+
+# Compiled demo video tools
+/tools/demo-video/bin/

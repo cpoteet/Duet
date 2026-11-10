@@ -184,7 +184,8 @@ kbd { display: inline-block; font-family: var(--mono); font-size: 0.8em; font-we
 .lead { font-size: 19px; line-height: 1.6; margin: 0; max-width: 560px; }
 .lead kbd { font-size: 15px; }
 .lead-note { color: var(--muted); font-size: 15px; margin: 12px 0 0; max-width: 560px; }
-.demo { position: relative; margin: 48px 0 0; }
+.demo { margin: 48px 0 0; }
+.demo-stage { position: relative; }
 .demo-video {
   display: block;
   width: 100%;
@@ -212,6 +213,19 @@ kbd { display: inline-block; font-family: var(--mono); font-size: 0.8em; font-we
 }
 .demo-toggle:hover { background: var(--background); transform: translateY(-1px); }
 .demo-toggle:active { transform: scale(0.97); }
+
+/* Steps under the demo. A plain list until the video plays; then the current step lights up
+   and a bar along its top edge tracks the step's progress. */
+.demo-steps { list-style: none; margin: 24px 0 0; padding: 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px 32px; counter-reset: demo-step; }
+.demo-steps li { position: relative; padding-top: 16px; border-top: 2px solid var(--border); counter-increment: demo-step; transition: opacity 240ms var(--ease); }
+.demo-steps li::before { content: ""; position: absolute; top: -2px; left: 0; height: 2px; width: calc(var(--step-progress, 0) * 100%); background: var(--accent); }
+.demo-step-name { display: block; font-weight: 600; font-size: 17px; }
+.demo-step-name::before { content: counter(demo-step, decimal-leading-zero); font-family: var(--mono); font-size: 13px; font-weight: 400; color: var(--subtle); margin-right: 10px; }
+.demo-step-text { display: block; color: var(--muted); font-size: 15px; line-height: 1.5; margin-top: 4px; }
+.demo-step-text kbd { font-size: 13px; }
+.demo-steps[data-playing] li { opacity: 0.45; }
+.demo-steps[data-playing] li.is-current { opacity: 1; }
+.demo-steps[data-playing] li.is-current .demo-step-name::before { color: var(--accent); }
 
 /* Features */
 .section { padding-top: 112px; }
@@ -262,7 +276,7 @@ kbd { display: inline-block; font-family: var(--mono); font-size: 0.8em; font-we
 
 @media (prefers-reduced-motion: reduce) {
   html { scroll-behavior: auto; }
-  .button, a, .demo-toggle, .menu-icon::before, .menu-icon::after { transition: none; }
+  .button, a, .demo-toggle, .demo-steps li, .menu-icon::before, .menu-icon::after { transition: none; }
   .site-nav[data-menu-ready] .nav-links, .site-nav[data-menu-ready].is-open .nav-links { transform: none; transition: none; }
   .button:hover, .button:active, .demo-toggle:hover, .demo-toggle:active { transform: none; }
 }
@@ -354,6 +368,10 @@ kbd { display: inline-block; font-family: var(--mono); font-size: 0.8em; font-we
   .demo { margin-top: 32px; }
   .demo-video { border-radius: 8px; }
   .demo-toggle { right: 10px; bottom: 10px; }
+  .demo-steps { grid-template-columns: 1fr; margin-top: 16px; gap: 0; }
+  .demo-steps li { display: grid; grid-template-columns: 112px minmax(0, 1fr); align-items: baseline; gap: 12px; padding: 12px 0; }
+  .demo-step-name { font-size: 16px; }
+  .demo-step-text { margin-top: 0; }
   .feature-visual-soft { padding: 12px; }
   .feature-copy h3 { font-size: 22px; }
   .hero-actions { width: 100%; }

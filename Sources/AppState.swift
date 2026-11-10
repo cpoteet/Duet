@@ -100,14 +100,14 @@ final class AppState: ObservableObject {
         }
     }
 
-    func setSplitView(_ enabled: Bool) {
+    func setSplitView(_ enabled: Bool, opensPromptDrawer: Bool = true) {
         guard !hasActiveOperations else { return }
         let wasSplitView = isSplitView
         if enabled {
             inactiveBrowserReleaseTask?.cancel()
             inactiveBrowserReleaseTask = nil
             if !wasSplitView {
-                isPromptDrawerOpen = true
+                if opensPromptDrawer { isPromptDrawerOpen = true }
                 mountedBrowserServices.removeAll()
             }
             ChatService.allCases.forEach { _ = browser(for: $0).prepare() }
@@ -121,7 +121,7 @@ final class AppState: ObservableObject {
     }
 
     /// Makes the workspace reflect an explicit prompt destination before dispatch begins.
-    func openWorkspace(for target: PromptTarget) {
+    func openWorkspace(for target: PromptTarget, opensPromptDrawer: Bool = true) {
         switch target {
         case .current:
             break
@@ -129,7 +129,7 @@ final class AppState: ObservableObject {
             select(service)
             setSplitView(false)
         case .both:
-            setSplitView(true)
+            setSplitView(true, opensPromptDrawer: opensPromptDrawer)
         }
         isLaunchChooserVisible = false
         recordCurrentWorkspaceDestination()
@@ -148,7 +148,9 @@ final class AppState: ObservableObject {
 
     /// Quick Prompt always starts new conversations. Recreate selected provider
     /// views first so an already-mounted conversation cannot interrupt the
-    /// fresh-chat navigation while SwiftUI changes panes.
+    /// fresh-chat navigation while SwiftUI changes panes. The prompt came from
+    /// the Quick Prompt panel, so the shared drawer stays out of the way: it is
+    /// never opened here, and an open one collapses unless it holds a draft.
     @discardableResult
     func openQuickPromptWorkspace(for target: PromptTarget) -> Bool {
         guard !hasActiveOperations else { return false }
@@ -157,7 +159,10 @@ final class AppState: ObservableObject {
         recreatedServices.forEach { service in
             browser(for: service).release()
         }
-        openWorkspace(for: target)
+        if prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            isPromptDrawerOpen = false
+        }
+        openWorkspace(for: target, opensPromptDrawer: false)
         return true
     }
 
@@ -200,15 +205,6 @@ final class AppState: ObservableObject {
         isPromptDrawerOpen = false
     }
 
-    func collapseEmptyPromptDrawer(
-        after results: [PromptDispatchResult],
-        ifUnchanged draft: PromptDraftSnapshot
-    ) {
-        guard !results.isEmpty, results.allSatisfy(\.wasSent),
-              draft.text.isEmpty, promptRevision == draft.revision, prompt == draft.text else { return }
-        isPromptDrawerOpen = false
-    }
-
     func send(draft: PromptDraftSnapshot, to target: PromptTarget) async -> [PromptDispatchResult] {
         let results = await send(prompt: draft.text, to: target)
         if !results.isEmpty && results.allSatisfy(\.wasSent) {
@@ -232,7 +228,7 @@ final class AppState: ObservableObject {
         guard Set(services).isDisjoint(with: activeDispatchServices),
               Set(services).isDisjoint(with: resettingServices) else {
             let results = services.map {
-                PromptDispatchResult(service: $0, outcome: .failed("A provider operation is already in progress"))
+                PromptDispatchResult(service: $0, outcome: .failed("Not sent, it's busy with another send or reset"))
             }
             dispatchNotice = DispatchNotice(results: results)
             return results

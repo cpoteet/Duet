@@ -143,7 +143,7 @@ final class BrowserController: NSObject, ObservableObject {
 
         do {
             guard service.allowsPromptInjection(at: webView?.url) else {
-                return .failed("Provider page is not active")
+                return .failed("Not sent, the page isn't showing a chat")
             }
             let result = try await evaluate(adapter.fillScript(prompt: prompt), as: ScriptResult.self)
             guard result.ok else {
@@ -153,14 +153,14 @@ final class BrowserController: NSObject, ObservableObject {
                 if result.reason == "composer-not-empty" {
                     return .composerHasDraft
                 }
-                return .failed("Unexpected page response")
+                return .failed("Not sent, couldn't fill its message box")
             }
             return await waitForSubmission(
                 prompt: prompt,
                 timeout: 4
             )
         } catch {
-            return .failed("Could not talk to page")
+            return .failed("Not sent, couldn't reach the page")
         }
     }
 
@@ -365,6 +365,13 @@ final class BrowserController: NSObject, ObservableObject {
         return nsError.domain == NSURLErrorDomain && nsError.code == NSURLErrorCancelled
     }
 
+    /// Once Send has been clicked, a failure can no longer claim "not sent".
+    private func cancelledOutcome(didClickSend: Bool) -> PromptDispatchOutcome {
+        didClickSend
+            ? .failed("Couldn't confirm it sent, the send was cancelled")
+            : .failed("Not sent, the send was cancelled")
+    }
+
     private func waitForSubmission(
         prompt: String,
         timeout: TimeInterval
@@ -372,10 +379,12 @@ final class BrowserController: NSObject, ObservableObject {
         var deadline = Date().addingTimeInterval(timeout)
         var didClickSend = false
         while Date() < deadline {
-            if Task.isCancelled { return .failed("Send cancelled") }
+            if Task.isCancelled { return cancelledOutcome(didClickSend: didClickSend) }
             do {
                 guard service.allowsPromptInjection(at: webView?.url) else {
-                    return .failed("Provider page changed before sending")
+                    return didClickSend
+                        ? .failed("Couldn't confirm it sent, the page changed")
+                        : .failed("Not sent, the page changed first")
                 }
                 if didClickSend {
                     if try await evaluate(
@@ -392,18 +401,20 @@ final class BrowserController: NSObject, ObservableObject {
                     }
                 }
             } catch {
-                return .failed("Could not execute prompt")
+                return didClickSend
+                    ? .failed("Couldn't confirm it sent, lost contact with the page")
+                    : .failed("Typed but not sent, lost contact with the page")
             }
             do {
                 try await Task.sleep(for: .milliseconds(180))
             } catch {
-                return .failed("Send cancelled")
+                return cancelledOutcome(didClickSend: didClickSend)
             }
         }
         if await isLoginRequired() { return .loginRequired }
         return didClickSend
-            ? .failed("Could not confirm prompt was sent")
-            : .failed("Send button did not become ready")
+            ? .failed("Couldn't confirm it sent, check the chat")
+            : .failed("Typed but not sent, couldn't press send")
     }
 
     private func evaluate<Value: Decodable & Sendable>(_ script: String, as type: Value.Type) async throws -> Value {

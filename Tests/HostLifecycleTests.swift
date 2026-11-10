@@ -990,38 +990,38 @@ struct HostLifecycleTests {
         expect(singleWorkspaceMounted, "Claude must mount before a single-provider Quick Prompt dispatch")
 
         let quickPromptDrawerState = AppState()
-        let emptyDrawerDraft = quickPromptDrawerState.capturePromptDraft()
         quickPromptDrawerState.openQuickPromptWorkspace(for: .both)
-        expect(quickPromptDrawerState.isPromptDrawerOpen, "Quick Prompt Both should initially open the shared drawer")
-        let successfulQuickPromptResults = ChatService.allCases.map {
-            PromptDispatchResult(service: $0, outcome: .sent)
-        }
-        let partialQuickPromptResults = [
-            PromptDispatchResult(service: .chatGPT, outcome: .sent),
-            PromptDispatchResult(service: .claude, outcome: .failed("Could not confirm prompt was sent"))
-        ]
-        quickPromptDrawerState.collapseEmptyPromptDrawer(after: [], ifUnchanged: emptyDrawerDraft)
-        expect(quickPromptDrawerState.isPromptDrawerOpen, "No Quick Prompt results must not collapse the shared drawer")
-        quickPromptDrawerState.collapseEmptyPromptDrawer(after: partialQuickPromptResults, ifUnchanged: emptyDrawerDraft)
-        expect(quickPromptDrawerState.isPromptDrawerOpen, "An unconfirmed Quick Prompt provider must keep the shared drawer open")
-        quickPromptDrawerState.collapseEmptyPromptDrawer(after: successfulQuickPromptResults, ifUnchanged: emptyDrawerDraft)
-        expect(!quickPromptDrawerState.isPromptDrawerOpen, "Successful Quick Prompt Both should collapse the unchanged empty drawer")
+        expect(quickPromptDrawerState.isSplitView, "Quick Prompt Both should enter split view")
+        expect(!quickPromptDrawerState.isPromptDrawerOpen, "Quick Prompt Both must not open the shared drawer")
+
+        quickPromptDrawerState.isPromptDrawerOpen = true
+        quickPromptDrawerState.openQuickPromptWorkspace(for: .both)
+        expect(!quickPromptDrawerState.isPromptDrawerOpen, "Quick Prompt Both should collapse an empty drawer in split view")
+
+        quickPromptDrawerState.isPromptDrawerOpen = true
+        quickPromptDrawerState.openQuickPromptWorkspace(for: .service(.claude))
+        expect(!quickPromptDrawerState.isPromptDrawerOpen, "Single-provider Quick Prompt should collapse an empty drawer")
+
+        quickPromptDrawerState.isPromptDrawerOpen = true
+        quickPromptDrawerState.prompt = "  \n"
+        quickPromptDrawerState.openQuickPromptWorkspace(for: .service(.chatGPT))
+        expect(!quickPromptDrawerState.isPromptDrawerOpen, "Quick Prompt should collapse a whitespace-only drawer")
 
         quickPromptDrawerState.isPromptDrawerOpen = true
         quickPromptDrawerState.prompt = "Existing shared draft"
-        let existingDrawerDraft = quickPromptDrawerState.capturePromptDraft()
-        quickPromptDrawerState.collapseEmptyPromptDrawer(after: successfulQuickPromptResults, ifUnchanged: existingDrawerDraft)
+        quickPromptDrawerState.openQuickPromptWorkspace(for: .both)
         expect(quickPromptDrawerState.isPromptDrawerOpen, "Quick Prompt must leave an existing shared draft visible")
         expect(quickPromptDrawerState.prompt == "Existing shared draft", "Quick Prompt must preserve an existing shared draft")
-        quickPromptDrawerState.prompt = ""
-        let unchangedEmptyDrawerDraft = quickPromptDrawerState.capturePromptDraft()
-        quickPromptDrawerState.prompt = "New shared draft"
-        quickPromptDrawerState.collapseEmptyPromptDrawer(after: successfulQuickPromptResults, ifUnchanged: unchangedEmptyDrawerDraft)
-        expect(quickPromptDrawerState.isPromptDrawerOpen, "Quick Prompt must leave a newer shared draft visible")
-        expect(quickPromptDrawerState.prompt == "New shared draft", "Quick Prompt must preserve a newer shared draft")
-        quickPromptDrawerState.prompt = ""
-        quickPromptDrawerState.collapseEmptyPromptDrawer(after: successfulQuickPromptResults, ifUnchanged: unchangedEmptyDrawerDraft)
-        expect(quickPromptDrawerState.isPromptDrawerOpen, "An edited drawer returning to empty must still count as a newer edit")
+
+        quickPromptDrawerState.isPromptDrawerOpen = false
+        quickPromptDrawerState.openQuickPromptWorkspace(for: .service(.claude))
+        quickPromptDrawerState.openQuickPromptWorkspace(for: .both)
+        expect(!quickPromptDrawerState.isPromptDrawerOpen, "Quick Prompt must not reveal a collapsed shared draft")
+        expect(quickPromptDrawerState.prompt == "Existing shared draft", "Quick Prompt must keep a collapsed shared draft")
+
+        quickPromptDrawerState.setSplitView(false)
+        quickPromptDrawerState.setSplitView(true)
+        expect(quickPromptDrawerState.isPromptDrawerOpen, "Entering split view by hand should still open the drawer after a Quick Prompt")
 
         singleQuickPromptState.reportQuickPromptWorkspaceUnavailable(for: .service(.claude))
         expect(
@@ -1391,8 +1391,8 @@ struct HostLifecycleTests {
             )
         for (configuration, expectedOutcome) in [
             ("3000, 5500", PromptDispatchOutcome.sent),
-            ("0, null", .failed("Could not confirm prompt was sent")),
-            ("null, null", .failed("Send button did not become ready"))
+            ("0, null", .failed("Couldn't confirm it sent, check the chat")),
+            ("null, null", .failed("Typed but not sent, couldn't press send"))
         ] {
             let state = AppState(startupDestination: .claude)
             let browser = state.browser(for: .claude)

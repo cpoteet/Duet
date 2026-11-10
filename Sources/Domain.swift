@@ -195,9 +195,9 @@ enum PromptDispatchOutcome: Equatable {
     var label: String {
         switch self {
         case .sent: "Sent"
-        case .loginRequired: "Sign in required"
-        case .unavailable: "Page not ready"
-        case .composerHasDraft: "Composer already has a draft"
+        case .loginRequired: "Not sent, sign in first"
+        case .unavailable: "Not sent, its message box didn't load"
+        case .composerHasDraft: "Not sent, its message box already has text"
         case .failed(let message): message
         }
     }

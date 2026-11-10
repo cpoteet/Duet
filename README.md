@@ -32,7 +32,7 @@ By default Duet keeps only the visible provider loaded, which saves memory. If y
 
 ## Sending one prompt to both
 
-The prompt drawer is a native text box at the bottom of the workspace. Open it with the Prompt button in the toolbar or Command-Shift-P. It also opens on its own whenever you enter split view.
+The prompt drawer is a native text box at the bottom of the workspace. Open it with the Prompt button in the toolbar or Command-Shift-P. It also opens on its own whenever you enter split view, except when a Quick Prompt send takes you there.
 
 - With one provider showing, Send to ChatGPT or Send to Claude (Command-Return) sends to that provider, and Send to Both (Command-Option-Return) switches to split view and sends to both.
 - In split view, Send to Both is the only option (Command-Return).

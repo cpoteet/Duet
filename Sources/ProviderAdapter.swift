@@ -228,27 +228,22 @@ struct ProviderAdapter {
 
           composer.focus();
           if (composer instanceof HTMLTextAreaElement || composer instanceof HTMLInputElement) {
+            // Use the native setter so framework-controlled fields see the
+            // change, then report it the way typing would.
             const prototype = composer instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
-            const descriptor = Object.getOwnPropertyDescriptor(prototype, 'value');
-            if (descriptor && descriptor.set) {
-              descriptor.set.call(composer, prompt);
-            } else {
-              composer.value = prompt;
-            }
+            Object.getOwnPropertyDescriptor(prototype, 'value').set.call(composer, prompt);
+            composer.dispatchEvent(new InputEvent('input', { bubbles: true, composed: true, inputType: 'insertText', data: prompt }));
+            composer.dispatchEvent(new Event('change', { bubbles: true }));
           } else {
+            // insertText goes through the editor's own input handling and
+            // fires its input events. Only the fallback needs one sent by hand.
             document.execCommand('selectAll', false, null);
             const inserted = document.execCommand('insertText', false, prompt);
-            if (!inserted || (composer.innerText || '').trim() !== prompt.trim()) composer.textContent = prompt;
+            if (!inserted || (composer.innerText || '').trim() !== prompt.trim()) {
+              composer.textContent = prompt;
+              composer.dispatchEvent(new InputEvent('input', { bubbles: true, composed: true, inputType: 'insertText', data: prompt }));
+            }
           }
-
-          try {
-            composer.dispatchEvent(new InputEvent('beforeinput', { bubbles: true, composed: true, inputType: 'insertText', data: prompt }));
-            composer.dispatchEvent(new InputEvent('input', { bubbles: true, composed: true, inputType: 'insertText', data: prompt }));
-          } catch (_) {
-            composer.dispatchEvent(new Event('input', { bubbles: true }));
-          }
-          composer.dispatchEvent(new Event('change', { bubbles: true }));
-          composer.dispatchEvent(new KeyboardEvent('keyup', { bubbles: true, key: ' ' }));
           return { ok: true };
         })()
         """
@@ -264,10 +259,18 @@ struct ProviderAdapter {
           \(composerHelpers)
           const composer = findComposer();
           if (!composer || normalize(composerText(composer)) !== prompt) return { ok: false, reason: 'composer-missing-prompt' };
-          const buttons = sendButtonSelectors.flatMap(selector => Array.from(document.querySelectorAll(selector)));
-          const sendButton = buttons.find(button =>
-            isVisible(button) && !button.disabled && button.getAttribute('aria-disabled') !== 'true'
-          );
+          // Use the Send buttons nearest the composer: walk up until an
+          // ancestor holds any candidate, so a broad fallback selector can't
+          // match some other form's button elsewhere on the page.
+          const ready = button => isVisible(button) && !button.disabled && button.getAttribute('aria-disabled') !== 'true';
+          let sendButton = null;
+          for (let scope = composer.parentElement; scope; scope = scope.parentElement) {
+            const candidates = sendButtonSelectors.flatMap(selector => Array.from(scope.querySelectorAll(selector))).filter(isVisible);
+            if (candidates.length > 0) {
+              sendButton = candidates.find(ready) || null;
+              break;
+            }
+          }
           if (!sendButton) return { ok: false, reason: 'send-button-not-ready' };
           sendButton.click();
           return { ok: true };

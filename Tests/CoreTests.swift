@@ -170,7 +170,10 @@ struct CoreTests {
 
         for service in ChatService.allCases {
             let adapter = ProviderAdapter.adapter(for: service)
-            expect(!adapter.generationIndicatorSelectors.isEmpty, "\(service.title) has no generation indicators")
+            expect(
+                !adapter.generationIndicatorSelectors.isEmpty || !adapter.generationControlSelectors.isEmpty,
+                "\(service.title) has no way to detect generation"
+            )
             let watcher = NotificationScript.responseWatcherSource(
                 adapter: adapter,
                 allowedHosts: service.providerPageHosts

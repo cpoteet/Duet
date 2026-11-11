@@ -7,6 +7,10 @@ struct ProviderAdapter {
     let sendButtonSelectors: [String]
     /// Elements present only while the provider is generating a response.
     let generationIndicatorSelectors: [String]
+    /// The composer's own semantic container (`form` or `fieldset`). A Stop
+    /// control counts as a generation indicator only inside this scope, so
+    /// unrelated Stop buttons elsewhere on the page don't. Don't use styling
+    /// classes or a fixed ancestor depth: both change with provider restyles.
     let generationControlScopeSelector: String
     let generationControlSelectors: [String]
     /// A provider-owned file input used to bridge WebKit file drops through
@@ -41,10 +45,10 @@ struct ProviderAdapter {
                     "button[aria-label*='Send']",
                     "button[type='submit']"
                 ],
-                generationIndicatorSelectors: [
-                    "button[data-testid='stop-button']"
-                ],
-                generationControlScopeSelector: "[class*='ComposerLayoutRoot-'], form",
+                // ChatGPT's Stop button has no test ID, only an aria-label, so
+                // the scoped Stop-label check below is its only indicator.
+                generationIndicatorSelectors: [],
+                generationControlScopeSelector: "form",
                 generationControlSelectors: ["button[aria-label^='Stop' i]"],
                 fileDropInputSelector: nil,
                 printableRegionMarkers: nil,
@@ -70,7 +74,7 @@ struct ProviderAdapter {
                     "[data-is-streaming='true']",
                     "button[data-testid='chat-input-stop']"
                 ],
-                generationControlScopeSelector: ".relative.w-full.min-w-0, form",
+                generationControlScopeSelector: "fieldset",
                 generationControlSelectors: ["button[aria-label^='Stop' i]"],
                 fileDropInputSelector: "input[type='file'][data-testid='file-upload']",
                 printableRegionMarkers: ["ingredients", "steps"],

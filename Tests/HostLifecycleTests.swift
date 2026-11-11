@@ -2188,8 +2188,10 @@ struct HostLifecycleTests {
         let fixtureScript = try String(contentsOf: fixtureURL("streaming-response.js"), encoding: .utf8)
         let fixtureHTML = try String(contentsOf: fixtureURL("streaming-response.html"), encoding: .utf8)
             .replacingOccurrences(
-                of: "__COMPOSER_CONTAINER_CLASS__",
-                with: service == .chatGPT ? "ComposerLayoutRoot-fixture" : "relative w-full min-w-0"
+                // Each provider's live composer sits in this element: ChatGPT's
+                // in a <form>, Claude's in a <fieldset>.
+                of: "__COMPOSER_SCOPE__",
+                with: service == .chatGPT ? "form" : "fieldset"
             )
             .replacingOccurrences(
                 of: "<script src=\"streaming-response.js\"></script>",
@@ -2265,18 +2267,18 @@ struct HostLifecycleTests {
             failures: &failures
         )
 
-        let testID = service == .chatGPT ? "stop-button" : "chat-input-stop"
-        _ = try await evaluate("(window.startStreaming(null, false, '\(testID)'), true)", in: webView) as Bool
-        try await Task.sleep(for: .milliseconds(300))
-        _ = try await evaluate("(window.finishStreaming(), true)", in: webView) as Bool
-        try await Task.sleep(for: .milliseconds(100))
-        expect(
-            presenter.completions.count == expectedCompletionCount + 1,
-            "\(service.title): provider stop test IDs must still report completion without a label",
-            failures: &failures
-        )
-
+        // ChatGPT's Stop button has no test ID, so only Claude's is checked.
         if service == .claude {
+            _ = try await evaluate("(window.startStreaming(null, false, 'chat-input-stop'), true)", in: webView) as Bool
+            try await Task.sleep(for: .milliseconds(300))
+            _ = try await evaluate("(window.finishStreaming(), true)", in: webView) as Bool
+            try await Task.sleep(for: .milliseconds(100))
+            expect(
+                presenter.completions.count == expectedCompletionCount + 1,
+                "Claude: the chat-input-stop test ID must still report completion without a label",
+                failures: &failures
+            )
+
             _ = try await evaluate("(window.startStreaming(null, true), true)", in: webView) as Bool
             try await Task.sleep(for: .milliseconds(300))
             _ = try await evaluate("(window.finishStreaming(), true)", in: webView) as Bool

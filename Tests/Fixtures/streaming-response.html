@@ -2,13 +2,20 @@
 <html>
 <head><meta charset="utf-8"><title>Streaming response fixture</title></head>
 <body>
-<aside id="unrelated-controls"></aside>
 <main>
   <div id="message" data-is-streaming="false">Response</div>
-  <div id="composer-container" class="__COMPOSER_CONTAINER_CLASS__">
-    <div id="prompt-textarea" data-testid="chat-input" contenteditable="true" role="textbox"></div>
-    <div id="controls"></div>
-  </div>
+  <!-- An unrelated control group of the same element type, earlier in the
+       page and sharing <main> with the composer, so only the composer's own
+       scope may count its Stop control. -->
+  <__COMPOSER_SCOPE__ id="unrelated-controls"></__COMPOSER_SCOPE__>
+  <__COMPOSER_SCOPE__ id="composer-container">
+    <div>
+      <div id="prompt-textarea" data-testid="chat-input" contenteditable="true" role="textbox"></div>
+    </div>
+    <div>
+      <div id="controls"></div>
+    </div>
+  </__COMPOSER_SCOPE__>
 </main>
 <script src="streaming-response.js"></script>
 </body>

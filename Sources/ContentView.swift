@@ -324,9 +324,12 @@ struct ContentView: View {
         .background(.thinMaterial)
         .overlay(alignment: .top) { hairline }
         .task(id: appState.isSplitView) {
-            // Take focus after the 0.2-second layout animation, which
-            // rebuilds the panes around the drawer.
-            try? await Task.sleep(for: .milliseconds(250))
+            // A layout change rebuilds the panes around the drawer. Take focus
+            // once the panes report a mount, not after the animation: taking
+            // down the outgoing panes only moves focus that a page still
+            // holds, and by then the drawer has it.
+            _ = await appState.waitForWorkspaceMount(for: appState.isSplitView ? .both : .current)
+            guard !Task.isCancelled else { return }
             isDrawerPromptFocused = true
         }
         .onChange(of: appState.promptFocusRequest) {

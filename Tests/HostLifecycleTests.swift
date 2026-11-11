@@ -1148,6 +1148,8 @@ struct HostLifecycleTests {
             failures.append("Fixture integration test threw: \(error)")
         }
 
+        await testInactiveReleaseWaitsForHost(failures: &failures)
+        await testHostHandOffRechecksWorkspace(failures: &failures)
         await testRapidProviderReversals(failures: &failures)
         await testRapidSplitReversals(failures: &failures)
         await testRetentionChangesDuringPendingCleanup(failures: &failures)
@@ -1161,16 +1163,123 @@ struct HostLifecycleTests {
         }
     }
 
+    /// Mounts a provider's current web view in a pane host, as SwiftUI does.
+    @MainActor
+    private static func mountedHost(for service: ChatService, in state: AppState) -> BrowserHostView {
+        let host = BrowserHostView(frame: .init(x: 0, y: 0, width: 400, height: 400))
+        if let webView = state.browser(for: service).webView {
+            host.install(webView)
+        }
+        return host
+    }
+
+    /// Lets a host's hand-off reach AppState, which hears about it a turn later.
+    @MainActor
+    private static func settle() async {
+        try? await Task.sleep(for: .milliseconds(20))
+    }
+
+    @MainActor
+    private static func testInactiveReleaseWaitsForHost(failures: inout [String]) async {
+        let state = AppState()
+        let chatGPTHost = mountedHost(for: .chatGPT, in: state)
+        state.select(.claude)
+        let claudeHost = mountedHost(for: .claude, in: state)
+        await settle()
+        expect(
+            state.browser(for: .chatGPT).webView != nil,
+            "The outgoing provider must stay loaded while its pane still holds it",
+            failures: &failures
+        )
+
+        chatGPTHost.clear()
+        await settle()
+        expect(
+            state.browser(for: .chatGPT).webView == nil,
+            "The outgoing provider should be released once its pane lets go of it",
+            failures: &failures
+        )
+        expect(
+            state.browser(for: .claude).webView?.superview === claudeHost,
+            "Releasing the outgoing provider must leave the visible pane alone",
+            failures: &failures
+        )
+
+        let unhostedState = AppState()
+        unhostedState.select(.claude)
+        expect(
+            unhostedState.browser(for: .chatGPT).webView == nil,
+            "An inactive provider no pane holds should be released right away",
+            failures: &failures
+        )
+    }
+
+    @MainActor
+    private static func testHostHandOffRechecksWorkspace(failures: inout [String]) async {
+        let reselectedState = AppState()
+        let reselectedHost = mountedHost(for: .chatGPT, in: reselectedState)
+        let reselectedView = reselectedState.browser(for: .chatGPT).webView
+        reselectedState.select(.claude)
+        reselectedState.select(.chatGPT)
+        reselectedHost.clear()
+        await settle()
+        expect(
+            reselectedState.browser(for: .chatGPT).webView === reselectedView,
+            "A hand-off must not release a provider that was selected again",
+            failures: &failures
+        )
+
+        let splitState = AppState()
+        let splitHost = mountedHost(for: .chatGPT, in: splitState)
+        splitState.select(.claude)
+        splitState.setSplitView(true)
+        splitHost.clear()
+        await settle()
+        expect(
+            ChatService.allCases.allSatisfy { splitState.browser(for: $0).webView != nil },
+            "A hand-off must not release a provider while split view shows it",
+            failures: &failures
+        )
+
+        let movedState = AppState()
+        movedState.setSplitView(true)
+        let chatGPTSplitHost = mountedHost(for: .chatGPT, in: movedState)
+        let claudeSplitHost = mountedHost(for: .claude, in: movedState)
+        let chatGPTView = movedState.browser(for: .chatGPT).webView
+        movedState.setSplitView(false)
+        let singleHost = mountedHost(for: .chatGPT, in: movedState)
+        await settle()
+        expect(
+            movedState.browser(for: .claude).webView?.superview === claudeSplitHost,
+            "Leaving split view must keep the inactive pane's view until its pane goes away",
+            failures: &failures
+        )
+        chatGPTSplitHost.clear()
+        claudeSplitHost.clear()
+        await settle()
+        expect(
+            movedState.browser(for: .claude).webView == nil,
+            "Leaving split view should release the inactive provider once its pane goes away",
+            failures: &failures
+        )
+        expect(
+            movedState.browser(for: .chatGPT).webView === chatGPTView && chatGPTView?.superview === singleHost,
+            "Leaving split view must keep the selected provider in its single pane",
+            failures: &failures
+        )
+    }
+
     @MainActor
     private static func testRapidProviderReversals(failures: inout [String]) async {
-        let state = AppState(inactiveBrowserReleaseDelay: .milliseconds(10))
+        let state = AppState()
+        let chatGPTHost = mountedHost(for: .chatGPT, in: state)
         let originalChatGPTView = state.browser(for: .chatGPT).webView
 
         for _ in 0..<10 {
             state.select(.claude)
             state.select(.chatGPT)
         }
-        try? await Task.sleep(for: .milliseconds(30))
+        await settle()
         expect(
             state.selectedService == .chatGPT && state.browser(for: .chatGPT).webView === originalChatGPTView,
             "Rapid Claude-to-ChatGPT reversals must not release or replace the final selected provider",
@@ -1178,26 +1287,31 @@ struct HostLifecycleTests {
         )
         expect(
             state.browser(for: .claude).webView == nil,
-            "Rapid Claude-to-ChatGPT reversals should eventually release inactive Claude",
+            "Rapid Claude-to-ChatGPT reversals should release inactive Claude",
             failures: &failures
         )
 
         state.select(.claude)
-        try? await Task.sleep(for: .milliseconds(30))
+        let claudeHost = mountedHost(for: .claude, in: state)
+        chatGPTHost.clear()
+        await settle()
         let originalClaudeView = state.browser(for: .claude).webView
         for _ in 0..<10 {
             state.select(.chatGPT)
             state.select(.claude)
         }
-        try? await Task.sleep(for: .milliseconds(30))
+        await settle()
         expect(
-            state.selectedService == .claude && state.browser(for: .claude).webView === originalClaudeView,
+            state.selectedService == .claude
+                && originalClaudeView != nil
+                && state.browser(for: .claude).webView === originalClaudeView
+                && originalClaudeView?.superview === claudeHost,
             "Rapid ChatGPT-to-Claude reversals must not release or replace the final selected provider",
             failures: &failures
         )
         expect(
             state.browser(for: .chatGPT).webView == nil,
-            "Rapid ChatGPT-to-Claude reversals should eventually release inactive ChatGPT",
+            "Rapid ChatGPT-to-Claude reversals should release inactive ChatGPT",
             failures: &failures
         )
     }
@@ -1205,14 +1319,13 @@ struct HostLifecycleTests {
     @MainActor
     private static func testRapidSplitReversals(failures: inout [String]) async {
         for selectedService in ChatService.allCases {
-            let releasingState = AppState(inactiveBrowserReleaseDelay: .milliseconds(10))
+            let releasingState = AppState()
             releasingState.select(selectedService)
-            try? await Task.sleep(for: .milliseconds(30))
 
             releasingState.setSplitView(true)
             releasingState.setSplitView(false)
             releasingState.setSplitView(true)
-            try? await Task.sleep(for: .milliseconds(30))
+            await settle()
             expect(releasingState.isSplitView, "Rapid split reversal should stop in split view", failures: &failures)
             expect(
                 ChatService.allCases.allSatisfy { releasingState.browser(for: $0).webView != nil },
@@ -1223,7 +1336,7 @@ struct HostLifecycleTests {
             releasingState.setSplitView(false)
             releasingState.setSplitView(true)
             releasingState.setSplitView(false)
-            try? await Task.sleep(for: .milliseconds(30))
+            await settle()
             expect(!releasingState.isSplitView, "Rapid split reversal should stop in single-pane view", failures: &failures)
             expect(
                 releasingState.browser(for: selectedService).webView != nil,
@@ -1238,7 +1351,7 @@ struct HostLifecycleTests {
                 failures: &failures
             )
 
-            let retainingState = AppState(inactiveBrowserReleaseDelay: .milliseconds(10))
+            let retainingState = AppState()
             retainingState.select(selectedService)
             retainingState.setKeepsProvidersLoaded(true)
             let retainedViews = Dictionary(
@@ -1249,7 +1362,7 @@ struct HostLifecycleTests {
                 retainingState.setSplitView(false)
                 retainingState.setSplitView(true)
             }
-            try? await Task.sleep(for: .milliseconds(30))
+            await settle()
             expect(retainingState.isSplitView, "Retained rapid split reversal should stop in split view", failures: &failures)
             expect(
                 ChatService.allCases.allSatisfy {
@@ -1263,11 +1376,13 @@ struct HostLifecycleTests {
 
     @MainActor
     private static func testRetentionChangesDuringPendingCleanup(failures: inout [String]) async {
-        let state = AppState(inactiveBrowserReleaseDelay: .milliseconds(20))
-        state.select(.claude)
+        let state = AppState()
+        let chatGPTHost = mountedHost(for: .chatGPT, in: state)
         let pendingChatGPTView = state.browser(for: .chatGPT).webView
+        state.select(.claude)
         state.setKeepsProvidersLoaded(true)
-        try? await Task.sleep(for: .milliseconds(40))
+        chatGPTHost.clear()
+        await settle()
         expect(
             state.browser(for: .chatGPT).webView === pendingChatGPTView
                 && state.browser(for: .claude).webView != nil,
@@ -1276,7 +1391,7 @@ struct HostLifecycleTests {
         )
 
         state.setKeepsProvidersLoaded(false)
-        try? await Task.sleep(for: .milliseconds(40))
+        await settle()
         expect(
             state.browser(for: .claude).webView != nil && state.browser(for: .chatGPT).webView == nil,
             "Disabling retention in single-pane mode should release only the inactive provider",
@@ -1289,7 +1404,7 @@ struct HostLifecycleTests {
             uniqueKeysWithValues: ChatService.allCases.map { ($0, state.browser(for: $0).webView) }
         )
         state.setKeepsProvidersLoaded(false)
-        try? await Task.sleep(for: .milliseconds(40))
+        await settle()
         expect(
             ChatService.allCases.allSatisfy { state.browser(for: $0).webView === splitViews[$0]! },
             "Disabling retention must not release either provider while split view is active",
@@ -1297,7 +1412,7 @@ struct HostLifecycleTests {
         )
 
         state.setSplitView(false)
-        try? await Task.sleep(for: .milliseconds(40))
+        await settle()
         expect(
             state.browser(for: .claude).webView != nil && state.browser(for: .chatGPT).webView == nil,
             "Leaving split view should resume cleanup after retention was disabled",
@@ -1307,25 +1422,30 @@ struct HostLifecycleTests {
 
     @MainActor
     private static func testRepeatedTransitionSoak(failures: inout [String]) async {
-        let releasingState = AppState(inactiveBrowserReleaseDelay: .milliseconds(5))
+        let releasingState = AppState()
+        var selectedHost = mountedHost(for: .chatGPT, in: releasingState)
         for _ in 0..<25 {
-            releasingState.select(.claude)
-            try? await Task.sleep(for: .milliseconds(10))
-            releasingState.select(.chatGPT)
-            try? await Task.sleep(for: .milliseconds(10))
+            for service in [ChatService.claude, .chatGPT] {
+                releasingState.select(service)
+                let nextHost = mountedHost(for: service, in: releasingState)
+                selectedHost.clear()
+                selectedHost = nextHost
+                await Task.yield()
+            }
             releasingState.setSplitView(true)
             releasingState.setSplitView(false)
-            try? await Task.sleep(for: .milliseconds(10))
+            await Task.yield()
         }
+        await settle()
         expect(
             releasingState.selectedService == .chatGPT
-                && releasingState.browser(for: .chatGPT).webView != nil
+                && releasingState.browser(for: .chatGPT).webView?.superview === selectedHost
                 && releasingState.browser(for: .claude).webView == nil,
             "Retention-off transition soak should settle with only the selected provider prepared",
             failures: &failures
         )
 
-        let retainingState = AppState(inactiveBrowserReleaseDelay: .milliseconds(5))
+        let retainingState = AppState()
         retainingState.setKeepsProvidersLoaded(true)
         let retainedViews = Dictionary(
             uniqueKeysWithValues: ChatService.allCases.map { ($0, retainingState.browser(for: $0).webView) }
@@ -1336,7 +1456,7 @@ struct HostLifecycleTests {
             retainingState.setSplitView(true)
             retainingState.setSplitView(false)
         }
-        try? await Task.sleep(for: .milliseconds(20))
+        await settle()
         expect(
             ChatService.allCases.allSatisfy { retainingState.browser(for: $0).webView === retainedViews[$0]! },
             "Retention-on transition soak should keep the same two provider views",

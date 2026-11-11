@@ -33,18 +33,14 @@ final class AppState: ObservableObject {
     private var keepsProvidersLoaded = false
     private var mountedBrowserServices: Set<ChatService> = []
     private var mountWaiters: [UUID: MountWaiter] = [:]
-    private var inactiveBrowserReleaseTask: Task<Void, Never>?
     private var hasCompletedUpdateCheck = false
     private var isCheckingForUpdate = false
-    private let inactiveBrowserReleaseDelay: Duration
     private let userDefaults: UserDefaults?
 
     init(
-        inactiveBrowserReleaseDelay: Duration = .milliseconds(300),
         startupDestination: StartupDestination = .askEveryTime,
         userDefaults: UserDefaults? = nil
     ) {
-        self.inactiveBrowserReleaseDelay = inactiveBrowserReleaseDelay
         self.userDefaults = userDefaults
         browsers = Dictionary(uniqueKeysWithValues: ChatService.allCases.map { ($0, BrowserController(service: $0)) })
 
@@ -66,7 +62,10 @@ final class AppState: ObservableObject {
         }
         recordCurrentWorkspaceDestination()
         reservePromptFocus()
-        browsers.values.forEach { $0.restorePromptFocus = { [weak self] in self?.promptFocusRequest &+= 1 } }
+        browsers.values.forEach { browser in
+            browser.restorePromptFocus = { [weak self] in self?.promptFocusRequest &+= 1 }
+            browser.webViewDidLeavePane = { [weak self] in self?.releaseInactiveBrowsersIfNeeded() }
+        }
     }
 
     private func reservePromptFocus() {
@@ -82,8 +81,8 @@ final class AppState: ObservableObject {
         let previous = selectedService
         _ = browser(for: service).prepare()
         selectedService = service
-        if !isSplitView, !keepsProvidersLoaded, previous != service {
-            scheduleInactiveBrowserRelease()
+        if previous != service {
+            releaseInactiveBrowsersIfNeeded()
         }
         recordCurrentWorkspaceDestination()
     }
@@ -101,11 +100,9 @@ final class AppState: ObservableObject {
         keepsProvidersLoaded = enabled
 
         if enabled {
-            inactiveBrowserReleaseTask?.cancel()
-            inactiveBrowserReleaseTask = nil
             ChatService.allCases.forEach { _ = browser(for: $0).prepare() }
-        } else if !isSplitView {
-            scheduleInactiveBrowserRelease()
+        } else {
+            releaseInactiveBrowsersIfNeeded()
         }
     }
 
@@ -113,8 +110,6 @@ final class AppState: ObservableObject {
         guard !hasActiveOperations else { return }
         let wasSplitView = isSplitView
         if enabled {
-            inactiveBrowserReleaseTask?.cancel()
-            inactiveBrowserReleaseTask = nil
             if !wasSplitView {
                 if opensPromptDrawer { isPromptDrawerOpen = true }
                 mountedBrowserServices.removeAll()
@@ -124,7 +119,7 @@ final class AppState: ObservableObject {
         } else {
             isSplitView = false
             mountedBrowserServices.removeAll()
-            scheduleInactiveBrowserRelease()
+            releaseInactiveBrowsersIfNeeded()
         }
         recordCurrentWorkspaceDestination()
     }
@@ -374,30 +369,16 @@ final class AppState: ObservableObject {
         self.updateAvailable = nil
     }
 
+    /// Releases each provider single-pane mode no longer shows. A provider
+    /// still in a pane waits: SwiftUI keeps the outgoing pane on screen until
+    /// its layout animation ends, and pulling the view out would blank it.
+    /// When that pane lets go, the web view reports it and this runs again.
     private func releaseInactiveBrowsersIfNeeded() {
         guard !isSplitView, !keepsProvidersLoaded else { return }
         ChatService.allCases
             .filter { $0 != selectedService && !isBusy($0) }
-            .forEach { browser(for: $0).release() }
-    }
-
-    /// SwiftUI can briefly keep the outgoing representable alive after its
-    /// selection or split state changes. Releasing during that update lets the
-    /// old host recreate its browser, so defer cleanup until the pane transition
-    /// has settled.
-    private func scheduleInactiveBrowserRelease() {
-        inactiveBrowserReleaseTask?.cancel()
-        let expectedService = selectedService
-        let releaseDelay = inactiveBrowserReleaseDelay
-        inactiveBrowserReleaseTask = Task { @MainActor [weak self] in
-            try? await Task.sleep(for: releaseDelay)
-            guard !Task.isCancelled,
-                  let self,
-                  !self.isSplitView,
-                  !self.keepsProvidersLoaded,
-                  self.selectedService == expectedService else { return }
-            self.releaseInactiveBrowsersIfNeeded()
-            self.inactiveBrowserReleaseTask = nil
-        }
+            .map { browser(for: $0) }
+            .filter { $0.webView?.superview == nil }
+            .forEach { $0.release() }
     }
 }

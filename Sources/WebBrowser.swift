@@ -13,6 +13,9 @@ final class BrowserController: NSObject, ObservableObject {
     @Published private(set) var webView: WKWebView?
     var reservesFocusForPrompt = false
     var restorePromptFocus: () -> Void = {}
+    /// Called when the web view leaves its pane, a turn after the pane lets
+    /// go, so the owner can release a provider that is no longer shown.
+    var webViewDidLeavePane: () -> Void = {}
     private lazy var notificationBridge = NotificationBridge(
         service: service,
         presenter: DuetNotificationManager.shared
@@ -56,6 +59,7 @@ final class BrowserController: NSObject, ObservableObject {
         let newWebView = ProviderWebView(frame: .zero, configuration: configuration)
         newWebView.reservesFocusForPrompt = { [weak self] in self?.reservesFocusForPrompt == true }
         newWebView.onRefusedFocus = { [weak self] in self?.restorePromptFocus() }
+        newWebView.onLeftSuperview = { [weak self] in self?.webViewDidLeavePane() }
         newWebView.allowsBackForwardNavigationGestures = true
         newWebView.navigationDelegate = self
         newWebView.uiDelegate = self
@@ -927,6 +931,15 @@ final class BrowserHostView: NSView {
 final class ProviderWebView: WKWebView {
     var reservesFocusForPrompt: () -> Bool = { false }
     var onRefusedFocus: () -> Void = {}
+    var onLeftSuperview: () -> Void = {}
+
+    override func viewDidMoveToSuperview() {
+        super.viewDidMoveToSuperview()
+        guard superview == nil else { return }
+        // SwiftUI removes a pane's view while it dismantles the pane, so
+        // report it on the next turn rather than from inside that update.
+        Task { @MainActor [onLeftSuperview] in onLeftSuperview() }
+    }
 
     override func becomeFirstResponder() -> Bool {
         guard !reservesFocusForPrompt() || isUserFocusEvent(NSApp.currentEvent) else {

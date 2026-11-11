@@ -1,12 +1,22 @@
 import AppKit
 import SwiftUI
 
+/// The View → Equal Widths action. SwiftUI re-renders the scene whenever a
+/// focused value changes, and two closures never compare equal, so a bare
+/// closure here re-rendered the whole window on every frame in split view.
+/// Every equalizer does the same thing, so they all compare equal.
+struct PaneWidthEqualizer: Equatable {
+    let perform: () -> Void
+
+    static func == (lhs: PaneWidthEqualizer, rhs: PaneWidthEqualizer) -> Bool { true }
+}
+
 private struct EqualizePaneWidthsKey: FocusedValueKey {
-    typealias Value = () -> Void
+    typealias Value = PaneWidthEqualizer
 }
 
 extension FocusedValues {
-    var equalizePaneWidths: (() -> Void)? {
+    var equalizePaneWidths: PaneWidthEqualizer? {
         get { self[EqualizePaneWidthsKey.self] }
         set { self[EqualizePaneWidthsKey.self] = newValue }
     }
@@ -144,7 +154,7 @@ struct ContentView: View {
         .background(.thinMaterial)
     }
 
-    private func launchChoice(_ destination: LaunchDestination) -> some View {
+    private func launchChoice(_ destination: WorkspaceLayout) -> some View {
         Button {
             beginSession(with: destination)
         } label: {
@@ -161,7 +171,7 @@ struct ContentView: View {
     }
 
     @ViewBuilder
-    private func launchChoiceMark(for destination: LaunchDestination) -> some View {
+    private func launchChoiceMark(for destination: WorkspaceLayout) -> some View {
         switch destination {
         case .chatGPT:
             ProviderMark(service: .chatGPT)
@@ -175,7 +185,7 @@ struct ContentView: View {
         }
     }
 
-    private func launchChoiceColor(for destination: LaunchDestination) -> Color {
+    private func launchChoiceColor(for destination: WorkspaceLayout) -> Color {
         switch destination {
         case .chatGPT: ChatService.chatGPT.brandColor
         case .claude: ChatService.claude.brandColor
@@ -183,20 +193,15 @@ struct ContentView: View {
         }
     }
 
-    private func beginSession(with destination: LaunchDestination) {
+    private func beginSession(with destination: WorkspaceLayout) {
         appState.isPromptDrawerOpen = false
         appState.openWorkspace(for: destination.promptTarget)
-    }
-
-    private var selectedWorkspace: LaunchDestination {
-        appState.isSplitView ? .both :
-            (appState.selectedService == .chatGPT ? .chatGPT : .claude)
     }
 
     private var workspacePicker: some View {
         Menu {
             Picker("Workspace", selection: Binding(
-                get: { selectedWorkspace },
+                get: { appState.workspaceLayout },
                 set: { appState.openWorkspace(for: $0.promptTarget) }
             )) {
                 Label {
@@ -204,35 +209,35 @@ struct ContentView: View {
                 } icon: {
                     ProviderMark(service: .chatGPT, size: 16)
                 }
-                .tag(LaunchDestination.chatGPT)
+                .tag(WorkspaceLayout.chatGPT)
                 Label {
                     Text("Claude")
                 } icon: {
                     ProviderMark(service: .claude, size: 16)
                 }
-                .tag(LaunchDestination.claude)
+                .tag(WorkspaceLayout.claude)
                 Label {
                     Text("Both")
                 } icon: {
                     Image(systemName: "rectangle.split.2x1")
                 }
-                .tag(LaunchDestination.both)
+                .tag(WorkspaceLayout.both)
             }
             .pickerStyle(.inline)
             .labelsHidden()
         } label: {
             HStack(spacing: 8) {
-                if selectedWorkspace == .both {
+                if appState.isSplitView {
                     HStack(spacing: 2) {
                         ProviderMark(service: .chatGPT, size: 14)
                         ProviderMark(service: .claude, size: 14)
                     }
                     .accessibilityHidden(true)
                 } else {
-                    ProviderMark(service: selectedWorkspace == .chatGPT ? .chatGPT : .claude, size: 16)
+                    ProviderMark(service: appState.selectedService, size: 16)
                         .accessibilityHidden(true)
                 }
-                Text(selectedWorkspace.title)
+                Text(appState.workspaceLayout.title)
             }
         }
         .labelStyle(.titleAndIcon)
@@ -240,9 +245,9 @@ struct ContentView: View {
         .help("Choose which providers to show")
     }
 
-    private var equalizePaneWidthsAction: (() -> Void)? {
+    private var equalizePaneWidthsAction: PaneWidthEqualizer? {
         guard appState.isSplitView, !appState.hasActiveOperations else { return nil }
-        return {
+        return PaneWidthEqualizer {
             splitViewRatio = 0.5
             splitViewResetID += 1
         }
@@ -319,10 +324,15 @@ struct ContentView: View {
         .background(.thinMaterial)
         .overlay(alignment: .top) { hairline }
         .task(id: appState.isSplitView) {
+            // Take focus after the 0.2-second layout animation, which
+            // rebuilds the panes around the drawer.
             try? await Task.sleep(for: .milliseconds(250))
             isDrawerPromptFocused = true
         }
         .onChange(of: appState.promptFocusRequest) {
+            // The focus state may still read true after a page took first
+            // responder, and setting it to true again would do nothing.
+            // Clear it, then set it on the next turn.
             isDrawerPromptFocused = false
             Task { isDrawerPromptFocused = true }
         }
@@ -404,7 +414,7 @@ struct ContentView: View {
         Task {
             defer { isPreparingPromptDispatch = false }
             guard await appState.preparePromptDrawerWorkspace(for: target) else {
-                appState.reportQuickPromptWorkspaceUnavailable(for: target)
+                appState.reportWorkspaceUnavailable(for: target)
                 return
             }
             _ = await appState.send(draft: draft, to: target)
@@ -627,11 +637,15 @@ private struct NativeSplitRatioRestorer: NSViewRepresentable {
     func updateNSView(_ nsView: SplitRatioMarkerView, context: Context) { }
 }
 
+/// Sits inside the first split pane and moves the enclosing `NSSplitView`'s
+/// divider to the saved ratio once the split view is wide enough to hold both
+/// panes. It retries whenever its pane is resized, which is how it learns the
+/// split view has been laid out.
 final class SplitRatioMarkerView: NSView {
     private let ratio: Double
     private let minimumPaneWidth: CGFloat
     private var hasRestored = false
-    private var attempts = 0
+    private var isRestoreScheduled = false
 
     init(ratio: Double, minimumPaneWidth: CGFloat) {
         self.ratio = ratio
@@ -645,8 +659,24 @@ final class SplitRatioMarkerView: NSView {
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
-        guard window != nil else { return }
-        DispatchQueue.main.async { [weak self] in self?.restorePosition() }
+        scheduleRestore()
+    }
+
+    override func setFrameSize(_ newSize: NSSize) {
+        super.setFrameSize(newSize)
+        scheduleRestore()
+    }
+
+    /// Moving the divider resizes this view, so never do it from inside the
+    /// layout pass that reported the size.
+    private func scheduleRestore() {
+        guard !hasRestored, !isRestoreScheduled, window != nil else { return }
+        isRestoreScheduled = true
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.isRestoreScheduled = false
+            self.restorePosition()
+        }
     }
 
     private func restorePosition() {
@@ -656,23 +686,16 @@ final class SplitRatioMarkerView: NSView {
         while let view = ancestor {
             if let splitView = view as? NSSplitView {
                 let availableWidth = splitView.bounds.width - splitView.dividerThickness
-                if availableWidth >= 2 * minimumPaneWidth {
-                    let position = min(
-                        max(splitView.bounds.width * ratio, minimumPaneWidth),
-                        availableWidth - minimumPaneWidth
-                    )
-                    splitView.setPosition(position, ofDividerAt: 0)
-                    hasRestored = true
-                    return
-                }
+                guard availableWidth >= 2 * minimumPaneWidth else { return }
+                let position = min(
+                    max(splitView.bounds.width * ratio, minimumPaneWidth),
+                    availableWidth - minimumPaneWidth
+                )
+                hasRestored = true
+                splitView.setPosition(position, ofDividerAt: 0)
+                return
             }
             ancestor = view.superview
-        }
-
-        guard attempts < 20 else { return }
-        attempts += 1
-        DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(50)) { [weak self] in
-            self?.restorePosition()
         }
     }
 }
@@ -692,28 +715,6 @@ private struct AppPalette {
     var success: Color { Color(red: 0.20, green: 0.64, blue: 0.42) }
     var warning: Color { Color(red: 0.92, green: 0.49, blue: 0.23) }
     var accent: Color { Color(red: 0.34, green: 0.40, blue: 0.82) }
-}
-
-private enum LaunchDestination: Hashable {
-    case chatGPT
-    case claude
-    case both
-
-    var title: String {
-        switch self {
-        case .chatGPT: "ChatGPT"
-        case .claude: "Claude"
-        case .both: "Both"
-        }
-    }
-
-    var promptTarget: PromptTarget {
-        switch self {
-        case .chatGPT: .service(.chatGPT)
-        case .claude: .service(.claude)
-        case .both: .both
-        }
-    }
 }
 
 private struct ProviderMark: View {

@@ -1,6 +1,9 @@
 import AppKit
+import os
 import UserNotifications
 import WebKit
+
+private let log = Logger(subsystem: "com.siolon.duet", category: "Notifications")
 
 /// Native notification behavior the bridge depends on. Production uses
 /// `DuetNotificationManager`; tests substitute a recorder because
@@ -12,23 +15,6 @@ protocol UserNotificationPresenting: AnyObject {
     func requestPermission() async -> NotificationPermission
     func show(_ request: NotificationShowRequest, from service: ChatService)
     func notifyResponseCompletion(for service: ChatService)
-}
-
-enum NotificationMessageOriginPolicy {
-    static func allows(
-        isMainFrame: Bool,
-        scheme: String,
-        host: String,
-        allowedHosts: [String]
-    ) -> Bool {
-        guard isMainFrame, scheme.lowercased() == "https" else { return false }
-        let normalizedHost = host.lowercased()
-        return allowedHosts.contains { domain in
-            let normalizedDomain = domain.lowercased()
-            return normalizedHost == normalizedDomain
-                || normalizedHost.hasSuffix(".\(normalizedDomain)")
-        }
-    }
 }
 
 @MainActor
@@ -104,18 +90,17 @@ extension NotificationBridge: WKScriptMessageHandlerWithReply {
         didReceive message: WKScriptMessage
     ) async -> (Any?, String?) {
         let origin = message.frameInfo.securityOrigin
-        guard NotificationMessageOriginPolicy.allows(
+        guard service.acceptsBridgeMessage(
             isMainFrame: message.frameInfo.isMainFrame,
-            scheme: origin.protocol,
-            host: origin.host,
-            allowedHosts: service.providerPageHosts
+            protocol: origin.protocol,
+            host: origin.host
         ) else { return (nil, nil) }
         guard let parsed = NotificationBridgeMessage(body: message.body) else { return (nil, nil) }
         switch parsed {
         case .permission:
-            return (await presenter.currentPermission().domValue, nil)
+            return (await presenter.currentPermission().rawValue, nil)
         case .requestPermission:
-            return (await presenter.requestPermission().domValue, nil)
+            return (await presenter.requestPermission().rawValue, nil)
         case .show(let request):
             presenter.show(request, from: service)
             return (nil, nil)
@@ -230,7 +215,11 @@ final class DuetNotificationManager: NSObject, UserNotificationPresenting {
                 content: content,
                 trigger: nil
             )
-            try? await UNUserNotificationCenter.current().add(notificationRequest)
+            do {
+                try await UNUserNotificationCenter.current().add(notificationRequest)
+            } catch {
+                log.error("Couldn't post a \(service.title, privacy: .public) notification: \(error.localizedDescription, privacy: .public)")
+            }
         }
     }
 

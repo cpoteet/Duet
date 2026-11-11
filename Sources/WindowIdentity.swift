@@ -45,6 +45,10 @@ enum DuetWindowSizePersistence {
 
 @MainActor
 enum DuetWindowRegistry {
+    /// Posted, with the window as its object, when a window becomes the
+    /// registered workspace.
+    static let didRegisterWorkspaceNotification = Notification.Name("com.siolon.duet.workspaceDidRegister")
+
     static weak var workspaceWindow: NSWindow?
 
     static func register(_ window: NSWindow) {
@@ -56,19 +60,31 @@ enum DuetWindowRegistry {
             return
         }
 
-        if let workspaceWindow, workspaceWindow !== window {
-            workspaceWindow.identifier = nil
-            workspaceWindow.isExcludedFromWindowsMenu = true
-        }
-
+        let replacedWindow = workspaceWindow === window ? nil : workspaceWindow
+        let isNewRegistration = replacedWindow != nil
+            || workspaceWindow == nil
+            || window.identifier != DuetWindowIdentifier.workspace
+        // Switch the registry before touching identifiers, so the replaced
+        // window's marker sees it is no longer the workspace and doesn't
+        // restore the identifier cleared below.
+        workspaceWindow = window
         window.identifier = DuetWindowIdentifier.workspace
         window.isExcludedFromWindowsMenu = false
-        workspaceWindow = window
+        if let replacedWindow {
+            replacedWindow.identifier = nil
+            replacedWindow.isExcludedFromWindowsMenu = true
+        }
+        if isNewRegistration {
+            NotificationCenter.default.post(name: didRegisterWorkspaceNotification, object: window)
+        }
     }
 
+    /// Only the registered workspace may host the provider web views, so a
+    /// stale or replaced window can't take them. Registration is the test,
+    /// not visibility: a window reopened on another Space, or still being
+    /// ordered in, is the workspace before it is visible.
     static func isActiveWorkspaceWindow(_ window: NSWindow) -> Bool {
-        window.identifier == DuetWindowIdentifier.workspace
-            && (window.isVisible || window.isMiniaturized)
+        window === workspaceWindow && window.identifier == DuetWindowIdentifier.workspace
     }
 
     static func unregister(_ window: NSWindow) {
@@ -94,20 +110,36 @@ enum DuetWindowRegistry {
         register(identifiedWindow)
         return identifiedWindow
     }
+
+    /// The workspace to bring back: a visible or minimized one, or, while
+    /// Duet is hidden, the registered window that hiding took off screen.
+    /// Hidden windows don't report as visible until the unhide finishes, so
+    /// without this a reveal would open a second workspace.
+    static func restorableWorkspaceWindow(
+        in windows: [NSWindow] = NSApp.windows,
+        appIsHidden: Bool = NSApp.isHidden
+    ) -> NSWindow? {
+        if let visibleWindow = visibleWorkspaceWindow(in: windows) { return visibleWindow }
+        guard appIsHidden,
+              let workspaceWindow,
+              workspaceWindow.identifier == DuetWindowIdentifier.workspace,
+              windows.contains(where: { $0 === workspaceWindow }) else { return nil }
+        return workspaceWindow
+    }
 }
 
 @MainActor
 final class WorkspaceWindowMarkerView: NSView {
     private static var hasCenteredWorkspaceThisLaunch = false
 
-    private var registrationTask: Task<Void, Never>?
     private weak var observedWindow: NSWindow?
+    private weak var registrationWindow: NSWindow?
+    private var identifierObservation: NSKeyValueObservation?
     private weak var restoredWindow: NSWindow?
 
     override func viewWillMove(toWindow newWindow: NSWindow?) {
         if let window, window !== newWindow {
-            registrationTask?.cancel()
-            registrationTask = nil
+            stopObservingRegistrationTriggers(window)
             stopObservingWindowResize(window)
             restoredWindow = nil
             DuetWindowRegistry.unregister(window)
@@ -118,12 +150,64 @@ final class WorkspaceWindowMarkerView: NSView {
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
         registerWorkspaceWindow()
-        scheduleRegistrationRefresh()
     }
 
     func registerWorkspaceWindow() {
         guard let window else { return }
+        observeRegistrationTriggers(window)
         restoreWindowSizeIfNeeded(window)
+        DuetWindowRegistry.register(window)
+    }
+
+    /// `register` refuses a window that isn't on screen yet while another
+    /// workspace still is. Becoming key or main, or coming back from the Dock,
+    /// means this window is in front, so register it again then.
+    private static let registrationTriggers: [Notification.Name] = [
+        NSWindow.didBecomeKeyNotification,
+        NSWindow.didBecomeMainNotification,
+        NSWindow.didDeminiaturizeNotification
+    ]
+
+    private func observeRegistrationTriggers(_ window: NSWindow) {
+        guard registrationWindow !== window else { return }
+        registrationWindow = window
+        // SwiftUI replaces the identifier with its own (such as
+        // "workspace-AppWindow-1") shortly after a reopened window appears.
+        // Put Duet's back right away, or the panes treat the window as
+        // inactive and never mount.
+        identifierObservation = window.observe(\.identifier) { [weak self] _, _ in
+            MainActor.assumeIsolated {
+                self?.restoreIdentifierIfNeeded()
+            }
+        }
+        for name in Self.registrationTriggers {
+            NotificationCenter.default.addObserver(
+                self,
+                selector: #selector(windowMayNeedRegistration(_:)),
+                name: name,
+                object: window
+            )
+        }
+    }
+
+    private func restoreIdentifierIfNeeded() {
+        guard let window,
+              window.identifier != DuetWindowIdentifier.workspace,
+              DuetWindowRegistry.workspaceWindow === window else { return }
+        DuetWindowRegistry.register(window)
+    }
+
+    private func stopObservingRegistrationTriggers(_ window: NSWindow) {
+        identifierObservation?.invalidate()
+        identifierObservation = nil
+        for name in Self.registrationTriggers {
+            NotificationCenter.default.removeObserver(self, name: name, object: window)
+        }
+        registrationWindow = nil
+    }
+
+    @objc private func windowMayNeedRegistration(_ notification: Notification) {
+        guard let window = notification.object as? NSWindow, window === self.window else { return }
         DuetWindowRegistry.register(window)
     }
 
@@ -167,18 +251,6 @@ final class WorkspaceWindowMarkerView: NSView {
     @objc private func windowDidResize(_ notification: Notification) {
         guard let window = notification.object as? NSWindow, window === self.window else { return }
         DuetWindowSizePersistence.save(window)
-    }
-
-    private func scheduleRegistrationRefresh() {
-        registrationTask?.cancel()
-        registrationTask = Task { @MainActor [weak self] in
-            for _ in 0..<10 {
-                try? await Task.sleep(for: .milliseconds(50))
-                guard !Task.isCancelled, let self, self.window != nil else { return }
-                self.registerWorkspaceWindow()
-            }
-            self?.registrationTask = nil
-        }
     }
 }
 

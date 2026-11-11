@@ -34,23 +34,69 @@ enum StartupDestination: String, CaseIterable, Identifiable {
     }
 
     func resolvedPromptTarget(lastWorkspaceDestinationRawValue: String?) -> PromptTarget? {
-        switch self {
-        case .askEveryTime:
-            nil
-        case .chatGPT:
-            .service(.chatGPT)
-        case .claude:
-            .service(.claude)
-        case .both:
-            .both
-        case .lastUsed:
-            switch lastWorkspaceDestinationRawValue.flatMap(StartupDestination.init(rawValue:)) {
-            case .chatGPT: .service(.chatGPT)
-            case .claude: .service(.claude)
-            case .both: .both
-            case .askEveryTime, .lastUsed, .none: nil
-            }
+        let layout = self == .lastUsed
+            ? lastWorkspaceDestinationRawValue.flatMap(WorkspaceLayout.init(rawValue:))
+            : WorkspaceLayout(rawValue: rawValue)
+        return layout?.promptTarget
+    }
+}
+
+/// The provider layouts the workspace can show. The raw values are saved as
+/// `lastWorkspaceDestination` and match the `StartupDestination` cases of the
+/// same name, so existing preferences keep working.
+enum WorkspaceLayout: String, CaseIterable, Hashable {
+    case chatGPT
+    case claude
+    case both
+
+    init(service: ChatService) {
+        switch service {
+        case .chatGPT: self = .chatGPT
+        case .claude: self = .claude
         }
+    }
+
+    var title: String {
+        switch self {
+        case .chatGPT: ChatService.chatGPT.title
+        case .claude: ChatService.claude.title
+        case .both: "Both"
+        }
+    }
+
+    var promptTarget: PromptTarget {
+        switch self {
+        case .chatGPT: .service(.chatGPT)
+        case .claude: .service(.claude)
+        case .both: .both
+        }
+    }
+}
+
+/// `true` when `host` is `domain` or one of its subdomains, ignoring case.
+/// A plain suffix match would also accept lookalikes such as `notclaude.ai`.
+func hostMatches(_ host: String, domain: String) -> Bool {
+    let host = host.lowercased()
+    let domain = domain.lowercased()
+    return host == domain || host.hasSuffix(".\(domain)")
+}
+
+/// Page-side versions of the origin checks above, for Duet's injected scripts.
+enum PageOriginScript {
+    /// A JavaScript expression that is `true` when the page's host is one of
+    /// `allowedHosts` or a subdomain, matching `hostMatches(_:domain:)`.
+    static func isAllowedHost(_ allowedHosts: [String]) -> String {
+        """
+        ((host => \(JavaScriptLiteral.array(allowedHosts.map { $0.lowercased() })).some(domain => host === domain || host.endsWith('.' + domain)))((location.hostname || '').toLowerCase()))
+        """
+    }
+
+    /// A JavaScript expression that is `true` on a provider sign-in path,
+    /// matching `ChatService.isAuthenticationPage`.
+    static var isAuthenticationPath: String {
+        """
+        \(JavaScriptLiteral.array(ChatService.authenticationPathComponents)).includes((location.pathname.split('/').filter(Boolean)[0] || '').toLowerCase())
+        """
     }
 }
 
@@ -92,12 +138,18 @@ enum ChatService: String, CaseIterable, Identifiable, Hashable {
         }
     }
 
-    private var providerNavigationHosts: [String] {
+    /// Every domain the provider owns: its app pages plus its company
+    /// domain. Navigation stays inside these, and a website-data reset removes
+    /// exactly their records.
+    private var providerDomains: [String] {
         switch self {
         case .chatGPT: providerPageHosts + ["openai.com"]
         case .claude: providerPageHosts + ["anthropic.com"]
         }
     }
+
+    /// First path components that mark a provider's own sign-in pages.
+    static let authenticationPathComponents = ["auth", "login", "signin", "sign-in"]
 
     private var providerAuthenticationHosts: [String] {
         switch self {
@@ -119,7 +171,7 @@ enum ChatService: String, CaseIterable, Identifiable, Hashable {
         guard let scheme = url.scheme?.lowercased() else { return false }
         if scheme == "about" { return true }
         guard scheme == "https", let host = url.host?.lowercased() else { return false }
-        return (providerNavigationHosts + authenticationHosts).contains { hostMatches(host, domain: $0) }
+        return (providerDomains + authenticationHosts).contains { hostMatches(host, domain: $0) }
     }
 
     func allowsPromptInjection(at url: URL?) -> Bool {
@@ -131,10 +183,17 @@ enum ChatService: String, CaseIterable, Identifiable, Hashable {
         allowsPromptInjection(at: url) && !isAuthenticationPage(url)
     }
 
-    func allowsMediaCapture(originProtocol: String, host: String) -> Bool {
+    /// Whether a script message or media request from this security origin
+    /// comes from one of the provider's own HTTPS app pages.
+    func isProviderPageOrigin(protocol originProtocol: String, host: String) -> Bool {
         guard originProtocol.lowercased() == "https" else { return false }
-        let normalizedHost = host.lowercased()
-        return providerPageHosts.contains { hostMatches(normalizedHost, domain: $0) }
+        return providerPageHosts.contains { hostMatches(host, domain: $0) }
+    }
+
+    /// Whether a native bridge should answer a script message: only the
+    /// provider's own HTTPS main frame may talk to Duet.
+    func acceptsBridgeMessage(isMainFrame: Bool, protocol originProtocol: String, host: String) -> Bool {
+        isMainFrame && isProviderPageOrigin(protocol: originProtocol, host: host)
     }
 
     func isAuthenticationPage(_ url: URL?) -> Bool {
@@ -144,27 +203,13 @@ enum ChatService: String, CaseIterable, Identifiable, Hashable {
         }
         guard providerPageHosts.contains(where: { hostMatches(host, domain: $0) }) else { return false }
         guard let firstPathComponent = url?.path.split(separator: "/").first?.lowercased() else { return false }
-        return ["auth", "login", "signin", "sign-in"].contains(firstPathComponent)
-    }
-
-    private func hostMatches(_ host: String, domain: String) -> Bool {
-        host == domain || host.hasSuffix(".\(domain)")
-    }
-
-    /// Domains whose persistent WebKit records belong to this provider.
-    var websiteDataDomains: [String] {
-        switch self {
-        case .chatGPT: ["chatgpt.com", "openai.com"]
-        case .claude: ["claude.ai", "anthropic.com"]
-        }
+        return Self.authenticationPathComponents.contains(firstPathComponent)
     }
 
     /// Matches a `WKWebsiteDataRecord.displayName`, which WebKit reports as a
-    /// registrable domain, against this provider's domains. A plain substring
-    /// match would also claim unrelated sites such as `notclaude.ai`.
+    /// registrable domain, against this provider's domains.
     func ownsWebsiteDataRecord(named displayName: String) -> Bool {
-        let name = displayName.lowercased()
-        return websiteDataDomains.contains { hostMatches(name, domain: $0) }
+        providerDomains.contains { hostMatches(displayName, domain: $0) }
     }
 }
 

@@ -6,6 +6,11 @@ struct PromptDraftSnapshot {
     let revision: Int
 }
 
+private struct MountWaiter {
+    let services: Set<ChatService>
+    let continuation: CheckedContinuation<Bool, Never>
+}
+
 @MainActor
 final class AppState: ObservableObject {
     @Published var selectedService: ChatService = .chatGPT
@@ -27,6 +32,7 @@ final class AppState: ObservableObject {
     private var promptRevision = 0
     private var keepsProvidersLoaded = false
     private var mountedBrowserServices: Set<ChatService> = []
+    private var mountWaiters: [UUID: MountWaiter] = [:]
     private var inactiveBrowserReleaseTask: Task<Void, Never>?
     private var hasCompletedUpdateCheck = false
     private var isCheckingForUpdate = false
@@ -82,9 +88,12 @@ final class AppState: ObservableObject {
         recordCurrentWorkspaceDestination()
     }
 
-    /// Tracks visible browser mounting for quick-prompt dispatch readiness.
+    /// Tracks which provider panes are mounted, so a send can wait for them.
     func browserDidMount(_ service: ChatService) {
         mountedBrowserServices.insert(service)
+        for (id, waiter) in mountWaiters where waiter.services.isSubset(of: mountedBrowserServices) {
+            finishMountWait(id, mounted: true)
+        }
     }
 
     func setKeepsProvidersLoaded(_ enabled: Bool) {
@@ -122,6 +131,9 @@ final class AppState: ObservableObject {
 
     /// Makes the workspace reflect an explicit prompt destination before dispatch begins.
     func openWorkspace(for target: PromptTarget, opensPromptDrawer: Bool = true) {
+        // Layout changes are refused during a send or reset, so don't leave
+        // the chooser for a layout that never appeared.
+        guard !hasActiveOperations else { return }
         switch target {
         case .current:
             break
@@ -135,15 +147,14 @@ final class AppState: ObservableObject {
         recordCurrentWorkspaceDestination()
     }
 
+    /// The layout the workspace is showing.
+    var workspaceLayout: WorkspaceLayout {
+        isSplitView ? .both : WorkspaceLayout(service: selectedService)
+    }
+
     private func recordCurrentWorkspaceDestination() {
         guard !isLaunchChooserVisible, let userDefaults else { return }
-        let destination: StartupDestination
-        if isSplitView {
-            destination = .both
-        } else {
-            destination = selectedService == .chatGPT ? .chatGPT : .claude
-        }
-        userDefaults.set(destination.rawValue, forKey: AppPreferenceKey.lastWorkspaceDestination)
+        userDefaults.set(workspaceLayout.rawValue, forKey: AppPreferenceKey.lastWorkspaceDestination)
     }
 
     /// Quick Prompt always starts new conversations. Recreate selected provider
@@ -166,19 +177,29 @@ final class AppState: ObservableObject {
         return true
     }
 
-    /// Lets a quick-prompt transition mount every destination WebKit view before
-    /// any of them begins a fresh-chat load.
-    func waitForQuickPromptWorkspaceMount(
+    /// Waits until every destination pane has mounted its web view, so no
+    /// send starts loading into a pane SwiftUI is still building. Mounts
+    /// recorded before a layout change were cleared with it and don't count.
+    func waitForWorkspaceMount(
         for target: PromptTarget,
         timeout: TimeInterval = 2.5
     ) async -> Bool {
         let expected = Set(services(for: target))
-        let deadline = Date().addingTimeInterval(timeout)
-        while Date() < deadline {
-            if expected.isSubset(of: mountedBrowserServices) { return true }
-            try? await Task.sleep(for: .milliseconds(50))
+        if expected.isSubset(of: mountedBrowserServices) { return true }
+
+        let id = UUID()
+        let timeoutTask = Task { @MainActor [weak self] in
+            guard (try? await Task.sleep(for: .seconds(timeout))) != nil else { return }
+            self?.finishMountWait(id, mounted: false)
         }
-        return expected.isSubset(of: mountedBrowserServices)
+        defer { timeoutTask.cancel() }
+        return await withCheckedContinuation { continuation in
+            mountWaiters[id] = MountWaiter(services: expected, continuation: continuation)
+        }
+    }
+
+    private func finishMountWait(_ id: UUID, mounted: Bool) {
+        mountWaiters.removeValue(forKey: id)?.continuation.resume(returning: mounted)
     }
 
     /// Sending the shared drawer to Both must happen from mounted split panes.
@@ -191,10 +212,9 @@ final class AppState: ObservableObject {
         if !isSplitView {
             openWorkspace(for: .both)
         }
-        return await waitForQuickPromptWorkspaceMount(for: .both, timeout: timeout)
+        return await waitForWorkspaceMount(for: .both, timeout: timeout)
     }
 
-    @discardableResult
     func capturePromptDraft() -> PromptDraftSnapshot {
         PromptDraftSnapshot(text: prompt, revision: promptRevision)
     }
@@ -287,7 +307,7 @@ final class AppState: ObservableObject {
             && Set(services).isDisjoint(with: resettingServices)
     }
 
-    func reportQuickPromptWorkspaceUnavailable(for target: PromptTarget) {
+    func reportWorkspaceUnavailable(for target: PromptTarget) {
         dispatchNotice = DispatchNotice(results: services(for: target).map {
             PromptDispatchResult(service: $0, outcome: .unavailable)
         })

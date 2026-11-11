@@ -30,6 +30,7 @@ fi
 rm -rf "$BUILD_DIR" "$APP_BUNDLE"
 mkdir -p "$BUILD_DIR" "$APP_BUNDLE/Contents/MacOS" "$APP_BUNDLE/Contents/Resources"
 
+# Swift autolinks the frameworks each source file imports.
 xcrun swiftc \
   -target arm64-apple-macos15.0 \
   -swift-version 6 \
@@ -37,11 +38,6 @@ xcrun swiftc \
   -warnings-as-errors \
   -O \
   -parse-as-library \
-  -framework SwiftUI \
-  -framework WebKit \
-  -framework AppKit \
-  -framework Combine \
-  -framework CoreLocation \
   "$ROOT"/Sources/*.swift \
   -o "$EXECUTABLE"
 
@@ -73,6 +69,10 @@ if [[ -z "$SIGNING_IDENTITY" && -f "$ROOT/.duet-signing-identity" ]]; then
   SIGNING_IDENTITY=$(< "$ROOT/.duet-signing-identity")
 fi
 if [[ "${DUET_RELEASE:-0}" == "1" ]]; then
+  if [[ "$SIGNING_IDENTITY" != "Developer ID Application: "* ]]; then
+    echo "DUET_RELEASE=1 needs a Developer ID Application signing identity." >&2
+    exit 1
+  fi
   codesign --force --sign "$SIGNING_IDENTITY" --options runtime --timestamp \
     --entitlements "$ROOT/Resources/Release.entitlements" "$APP_BUNDLE" >/dev/null
 elif [[ "$SIGNING_IDENTITY" == "Developer ID Application: "* ]]; then

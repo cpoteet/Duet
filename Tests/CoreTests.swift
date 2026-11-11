@@ -1,4 +1,5 @@
 import Foundation
+import JavaScriptCore
 
 @main
 struct CoreTests {
@@ -18,8 +19,6 @@ struct CoreTests {
         expect(BrowserPhase.ready.promptReadinessTimeout == 12, "A loaded page with no composer should fail promptly")
         expect(BrowserPhase.failed("The request timed out.").failureMessage == "The request timed out.", "A failed provider load must expose its error for the pane")
         expect(BrowserPhase.loading.failureMessage == nil, "A loading provider must not show a failure")
-        expect(ChatService.allCases.count == 2, "Expected exactly two services")
-        expect(StartupDestination.allCases.count == 5, "Expected five startup destination choices")
         expect(StartupDestination.askEveryTime.title == "Ask Every Time", "Ask-every-time startup label changed")
         expect(
             StartupDestination.chatGPT.resolvedPromptTarget(lastWorkspaceDestinationRawValue: nil) == .service(.chatGPT),
@@ -49,11 +48,11 @@ struct CoreTests {
         expect(ChatService.chatGPT.allowsPromptInjection(at: URL(string: "https://chatgpt.com/c/123")!), "ChatGPT prompt origin must be allowed")
         expect(!ChatService.chatGPT.allowsPromptInjection(at: URL(string: "https://openai.com")!), "Related marketing hosts must not receive prompt injection")
         expect(!ChatService.chatGPT.allowsPromptInjection(at: URL(string: "https://accounts.google.com/signin")!), "Authentication pages must not receive prompt injection")
-        expect(ChatService.chatGPT.allowsMediaCapture(originProtocol: "https", host: "www.chatgpt.com"), "ChatGPT provider pages must be allowed to request media capture")
-        expect(ChatService.claude.allowsMediaCapture(originProtocol: "HTTPS", host: "CLAUDE.AI"), "Claude media-capture origins should be case-insensitive")
-        expect(!ChatService.chatGPT.allowsMediaCapture(originProtocol: "http", host: "chatgpt.com"), "Non-HTTPS media capture must be rejected")
-        expect(!ChatService.chatGPT.allowsMediaCapture(originProtocol: "https", host: "chatgpt.com.evil.example"), "Media-capture host suffix spoof must be rejected")
-        expect(!ChatService.chatGPT.allowsMediaCapture(originProtocol: "https", host: "auth.openai.com"), "Authentication pages must not receive media capture access")
+        expect(ChatService.chatGPT.isProviderPageOrigin(protocol: "https", host: "www.chatgpt.com"), "ChatGPT provider pages must be allowed to request media capture")
+        expect(ChatService.claude.isProviderPageOrigin(protocol: "HTTPS", host: "CLAUDE.AI"), "Claude media-capture origins should be case-insensitive")
+        expect(!ChatService.chatGPT.isProviderPageOrigin(protocol: "http", host: "chatgpt.com"), "Non-HTTPS media capture must be rejected")
+        expect(!ChatService.chatGPT.isProviderPageOrigin(protocol: "https", host: "chatgpt.com.evil.example"), "Media-capture host suffix spoof must be rejected")
+        expect(!ChatService.chatGPT.isProviderPageOrigin(protocol: "https", host: "auth.openai.com"), "Authentication pages must not receive media capture access")
         expect(ChatService.chatGPT.isAuthenticationPage(URL(string: "https://auth.openai.com/login")!), "Provider authentication host should require sign-in")
         expect(ChatService.claude.isAuthenticationPage(URL(string: "https://accounts.google.com/signin")!), "Shared identity host should require sign-in")
         expect(ChatService.claude.isAuthenticationPage(URL(string: "https://claude.ai/login")!), "Provider login path should require sign-in")
@@ -88,7 +87,7 @@ struct CoreTests {
             let readiness = adapter.readinessScript()
             let fill = adapter.fillScript(prompt: "A quote: \\\" and a newline\\nnext line")
             let submit = adapter.submissionScript(prompt: "test")
-            let confirmation = adapter.submissionConfirmationScript(prompt: "test")
+            let confirmation = adapter.submissionConfirmationScript()
             let fileDropCompatibility = adapter.fileDropCompatibilityScript()
             expect(
                 (adapter.verificationChallengeScript() != nil) == (service == .claude),
@@ -107,14 +106,14 @@ struct CoreTests {
             expect(submit.contains("composer-missing-prompt"), "\(service.title) submission must check the composer before clicking")
             expect(confirmation.contains("composerSelectors"), "\(service.title) confirmation must find the current composer")
             expect(confirmation.contains("getClientRects"), "\(service.title) confirmation must require a visible composer")
-            expect(fill.contains("A quote:"), "\(service.title) prompt was not encoded")
             if service == .claude {
                 expect(
                     fileDropCompatibility?.contains("data-testid='file-upload'") == true,
                     "Claude file drops must use its provider-owned upload input"
                 )
                 expect(
-                    fileDropCompatibility?.contains("hostname === 'claude.ai'") == true,
+                    fileDropCompatibility?.contains("location.protocol === 'https:'") == true
+                        && fileDropCompatibility?.contains(PageOriginScript.isAllowedHost(service.providerPageHosts)) == true,
                     "Claude file-drop compatibility must be origin-gated"
                 )
             } else {
@@ -138,9 +137,9 @@ struct CoreTests {
             NotificationScript.source(initialPermission: .granted, allowedHosts: ["claude.ai"]).contains("\"granted\""),
             "Shim does not seed a granted permission"
         )
-        expect(NotificationPermission.undetermined.domValue == "default", "Undetermined permission must map to the DOM default state")
-        expect(NotificationPermission.granted.domValue == "granted", "Granted permission must keep its DOM value")
-        expect(NotificationPermission.denied.domValue == "denied", "Denied permission must keep its DOM value")
+        expect(NotificationPermission.undetermined.rawValue == "default", "Undetermined permission must map to the DOM default state")
+        expect(NotificationPermission.granted.rawValue == "granted", "Granted permission must keep its DOM value")
+        expect(NotificationPermission.denied.rawValue == "denied", "Denied permission must keep its DOM value")
 
         expect(
             NotificationBridgeMessage(body: ["type": "permission"]) == .permission,
@@ -234,12 +233,36 @@ struct CoreTests {
             "An old site notification must not suppress a new completion"
         )
 
-        let fixtures = ["textarea.html", "contenteditable.html", "signed-out.html", "login-discussion.html", "delayed-send.html", "notifications.html", "streaming-response.html"]
-        let fixtureDirectory = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
-            .appendingPathComponent("Tests/Fixtures")
-        for fixture in fixtures {
-            let url = fixtureDirectory.appendingPathComponent(fixture)
-            expect(FileManager.default.fileExists(atPath: url.path), "Missing fixture \(fixture)")
+        // Generated scripts embed prompts and selectors as literals, so a
+        // value must come back unchanged when JavaScript evaluates it.
+        if let context = JSContext() {
+            let awkwardValues = [
+                "A quote: \" and a newline\nnext line",
+                "Backslash \\ and </script> and ${template}",
+                "Line separators \u{2028}\u{2029} and emoji 👋",
+                "'single' `backtick`"
+            ]
+            for value in awkwardValues {
+                let decoded = context.evaluateScript(JavaScriptLiteral.string(value))?.toString()
+                expect(decoded == value, "JavaScriptLiteral.string did not round-trip \(value.debugDescription)")
+            }
+            let decodedArray = context.evaluateScript(JavaScriptLiteral.array(awkwardValues))?.toArray() as? [String]
+            expect(decodedArray == awkwardValues, "JavaScriptLiteral.array did not round-trip its values")
+
+            context.evaluateScript("var location = { hostname: '', pathname: '/' };")
+            for (host, allowed) in [("claude.ai", true), ("www.Claude.AI", true), ("notclaude.ai", false), ("claude.ai.evil.example", false)] {
+                context.evaluateScript("location.hostname = \(JavaScriptLiteral.string(host));")
+                let result = context.evaluateScript(PageOriginScript.isAllowedHost(ChatService.claude.providerPageHosts))?.toBool()
+                expect(result == allowed, "Page host check for \(host) returned \(String(describing: result))")
+                expect(hostMatches(host, domain: "claude.ai") == allowed, "Native host check for \(host) disagrees with the page check")
+            }
+            for (path, isAuthentication) in [("/login", true), ("/Sign-In/next", true), ("/new", false), ("/", false)] {
+                context.evaluateScript("location.pathname = \(JavaScriptLiteral.string(path));")
+                let result = context.evaluateScript(PageOriginScript.isAuthenticationPath)?.toBool()
+                expect(result == isAuthentication, "Page sign-in path check for \(path) returned \(String(describing: result))")
+            }
+        } else {
+            failures.append("Couldn't create a JavaScript context")
         }
 
         if failures.isEmpty {

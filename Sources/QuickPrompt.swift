@@ -1,27 +1,39 @@
 import AppKit
 @preconcurrency import Carbon.HIToolbox
+import os
 import SwiftUI
+
+private let log = Logger(subsystem: "com.siolon.duet", category: "QuickPrompt")
 
 @MainActor
 final class DuetApplicationDelegate: NSObject, NSApplicationDelegate {
     private var quickPrompt: QuickPromptPanelController?
     private var hotKey: GlobalHotKey?
+    private var reopenWorkspace: (() -> Void)?
+    private var workspaceRegistrationTimeout: Task<Void, Never>?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.regular)
         DuetNotificationManager.shared.start()
     }
 
-    func configureQuickPrompt(with appState: AppState, reopenWorkspace: @escaping () -> Void) {
+    /// Called once the workspace scene exists. `reopenWorkspace` opens a new
+    /// workspace window after the user has closed the last one.
+    func configure(with appState: AppState, reopenWorkspace: @escaping () -> Void) {
         guard quickPrompt == nil else { return }
+        self.reopenWorkspace = reopenWorkspace
 
-        let quickPrompt = QuickPromptPanelController(
-            appState: appState,
-            reopenWorkspace: reopenWorkspace
-        )
+        let quickPrompt = QuickPromptPanelController(appState: appState) { [weak self] in
+            self?.revealWorkspace()
+        }
         self.quickPrompt = quickPrompt
         hotKey = GlobalHotKey(keyCode: UInt32(kVK_Space), modifiers: UInt32(controlKey | optionKey)) { [weak quickPrompt] in
             quickPrompt?.show()
+        }
+        if hotKey == nil {
+            // Another app most likely owns Control-Option-Space. Quick Prompt
+            // stays available from the Tools and Dock menus.
+            log.error("Couldn't register the Quick Prompt shortcut, Control-Option-Space")
         }
     }
 
@@ -44,10 +56,61 @@ final class DuetApplicationDelegate: NSObject, NSApplicationDelegate {
         return menu
     }
 
-    /// Brings the workspace forward for surfaces outside the workspace window,
-    /// such as clicking a provider notification.
+    /// Brings the workspace forward for surfaces outside it, such as Quick
+    /// Prompt and notification clicks, reopening it if the user closed it.
     func revealWorkspace() {
-        quickPrompt?.revealWorkspace()
+        // Look before unhiding: a hidden window only counts as visible again
+        // once the unhide has finished.
+        let workspaceWindow = DuetWindowRegistry.restorableWorkspaceWindow()
+        NSApp.unhide(nil)
+
+        if let workspaceWindow {
+            focus(workspaceWindow)
+            return
+        }
+        guard let reopenWorkspace else { return }
+        // Listen first: the new window can register during `openWindow`.
+        focusWorkspaceWhenItRegisters()
+        reopenWorkspace()
+    }
+
+    /// A reopened window registers a few run-loop turns after `openWindow`.
+    /// Focus it when it does. Stop listening after two seconds so a later,
+    /// unrelated registration can't pull the workspace forward.
+    private func focusWorkspaceWhenItRegisters() {
+        stopWaitingForWorkspace()
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(workspaceDidRegister(_:)),
+            name: DuetWindowRegistry.didRegisterWorkspaceNotification,
+            object: nil
+        )
+        workspaceRegistrationTimeout = Task { @MainActor [weak self] in
+            guard (try? await Task.sleep(for: .seconds(2))) != nil else { return }
+            self?.stopWaitingForWorkspace()
+        }
+    }
+
+    @objc private func workspaceDidRegister(_ notification: Notification) {
+        guard let workspaceWindow = notification.object as? NSWindow else { return }
+        stopWaitingForWorkspace()
+        focus(workspaceWindow)
+    }
+
+    private func stopWaitingForWorkspace() {
+        workspaceRegistrationTimeout?.cancel()
+        workspaceRegistrationTimeout = nil
+        NotificationCenter.default.removeObserver(
+            self,
+            name: DuetWindowRegistry.didRegisterWorkspaceNotification,
+            object: nil
+        )
+    }
+
+    private func focus(_ workspaceWindow: NSWindow) {
+        workspaceWindow.deminiaturize(nil)
+        NSApp.activate(ignoringOtherApps: true)
+        workspaceWindow.makeKeyAndOrderFront(nil)
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
@@ -64,13 +127,9 @@ final class DuetApplicationDelegate: NSObject, NSApplicationDelegate {
 
 @MainActor
 private final class QuickPromptPanelController: NSObject, NSWindowDelegate {
-    private let appState: AppState
-    private let reopenWorkspace: () -> Void
     private let panel: NSPanel
 
-    init(appState: AppState, reopenWorkspace: @escaping () -> Void) {
-        self.appState = appState
-        self.reopenWorkspace = reopenWorkspace
+    init(appState: AppState, revealWorkspace: @escaping () -> Void) {
         panel = NSPanel(
             contentRect: NSRect(x: 0, y: 0, width: 500, height: 212),
             // Non-activating, so the panel can take the keyboard without
@@ -90,11 +149,11 @@ private final class QuickPromptPanelController: NSObject, NSWindowDelegate {
         panel.hidesOnDeactivate = false
         panel.delegate = self
         panel.contentViewController = NSHostingController(
-            rootView: QuickPromptView(appState: appState) { [weak self] in
-                self?.dismiss()
-            } revealWorkspace: { [weak self] in
-                self?.revealWorkspace()
-            }
+            rootView: QuickPromptView(
+                appState: appState,
+                dismiss: { [weak self] in self?.dismiss() },
+                revealWorkspace: revealWorkspace
+            )
         )
         panel.center()
 
@@ -114,14 +173,19 @@ private final class QuickPromptPanelController: NSObject, NSWindowDelegate {
         if NSApp.isHidden {
             NSApp.activate(ignoringOtherApps: true)
         }
+        // Order the panel front on the next turn, after AppKit has handled
+        // any unhide request above.
         DispatchQueue.main.async { [weak panel] in
             panel?.makeKeyAndOrderFront(nil)
         }
     }
 
-    /// The panel no longer hides with the app, so put it away when the user
-    /// clicks elsewhere instead of leaving it floating over other apps.
+    /// The panel doesn't hide with the app (see `hidesOnDeactivate`), so put
+    /// it away when the user clicks into another app instead of leaving it
+    /// floating there.
     func windowDidResignKey(_ notification: Notification) {
+        // Check on the next turn, once the change in key window and active
+        // app has been processed.
         DispatchQueue.main.async { [weak self] in
             self?.hideIfDuetIsInactive()
         }
@@ -134,40 +198,6 @@ private final class QuickPromptPanelController: NSObject, NSWindowDelegate {
 
     private func dismiss() {
         panel.orderOut(nil)
-    }
-
-    func revealWorkspace() {
-        NSApp.unhide(nil)
-
-        if let workspaceWindow = DuetWindowRegistry.visibleWorkspaceWindow() {
-            focus(workspaceWindow)
-            return
-        }
-
-        reopenWorkspace()
-        focusReopenedWorkspace()
-    }
-
-    private func focusReopenedWorkspace(
-        attemptsRemaining: Int = 40
-    ) {
-        DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(50)) { [weak self] in
-            guard let self else { return }
-
-            if let workspaceWindow = DuetWindowRegistry.visibleWorkspaceWindow() {
-                self.focus(workspaceWindow)
-            } else if attemptsRemaining > 1 {
-                self.focusReopenedWorkspace(
-                    attemptsRemaining: attemptsRemaining - 1
-                )
-            }
-        }
-    }
-
-    private func focus(_ workspaceWindow: NSWindow) {
-        workspaceWindow.deminiaturize(nil)
-        NSApp.activate(ignoringOtherApps: true)
-        workspaceWindow.makeKeyAndOrderFront(nil)
     }
 
     func windowShouldClose(_ sender: NSWindow) -> Bool {
@@ -251,8 +281,8 @@ private struct QuickPromptView: View {
         revealWorkspace()
 
         Task {
-            guard await appState.waitForQuickPromptWorkspaceMount(for: target) else {
-                appState.reportQuickPromptWorkspaceUnavailable(for: target)
+            guard await appState.waitForWorkspaceMount(for: target) else {
+                appState.reportWorkspaceUnavailable(for: target)
                 return
             }
             let results = await appState.send(
@@ -330,6 +360,8 @@ private func globalHotKeyEventHandler(
 ) -> OSStatus {
     guard let userData else { return noErr }
     let hotKey = Unmanaged<GlobalHotKey>.fromOpaque(userData).takeUnretainedValue()
+    // Carbon calls this as a plain C function, so hop to the main actor
+    // rather than pass the raw pointer across isolation.
     Task { @MainActor in
         hotKey.invoke()
     }

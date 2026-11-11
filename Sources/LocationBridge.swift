@@ -125,7 +125,9 @@ final class CoreLocationProvider: NSObject, LocationProviding, @preconcurrency C
         return try await withCheckedThrowingContinuation { continuation in
             self.continuation = continuation
             timeoutTask = Task { [weak self] in
-                try? await Task.sleep(for: .seconds(15))
+                // A cancelled sleep means the request already finished; don't
+                // let it time out the next one.
+                guard (try? await Task.sleep(for: .seconds(15))) != nil else { return }
                 self?.finish(.failure(LocationProviderError.timedOut))
             }
             continueAfterAuthorizationChange()
@@ -181,11 +183,7 @@ enum LocationScript {
     static func source(allowedHosts: [String]) -> String {
         """
         (() => {
-          const allowedHosts = \(JavaScriptLiteral.array(allowedHosts));
-          const host = (location.hostname || '').toLowerCase();
-          const allowed = allowedHosts.some(domain => host === domain || host.endsWith(`.${domain}`));
-          const firstPath = location.pathname.split('/').filter(Boolean)[0]?.toLowerCase();
-          if (!allowed || ['auth', 'login', 'signin', 'sign-in'].includes(firstPath) || window.__duetLocationBridgeInstalled) return;
+          if (!\(PageOriginScript.isAllowedHost(allowedHosts)) || \(PageOriginScript.isAuthenticationPath) || window.__duetLocationBridgeInstalled) return;
 
           const bridge = window.webkit?.messageHandlers?.\(handlerName);
           if (!bridge?.postMessage) return;
@@ -244,6 +242,8 @@ enum LocationScript {
             getCurrentPosition(successCallback, errorCallback, options) {
               requestPosition(successCallback, errorCallback, options);
             },
+            // The bridge only offers one-shot fixes, so a watch reports a
+            // single position rather than tracking the user continuously.
             watchPosition(successCallback, errorCallback, options) {
               const identifier = nextWatchIdentifier++;
               activeWatches.add(identifier);
@@ -329,11 +329,10 @@ extension LocationBridge: WKScriptMessageHandlerWithReply {
         didReceive message: WKScriptMessage
     ) async -> (Any?, String?) {
         let origin = message.frameInfo.securityOrigin
-        guard NotificationMessageOriginPolicy.allows(
+        guard service.acceptsBridgeMessage(
             isMainFrame: message.frameInfo.isMainFrame,
-            scheme: origin.protocol,
-            host: origin.host,
-            allowedHosts: service.providerPageHosts
+            protocol: origin.protocol,
+            host: origin.host
         ), service.allowsNativePermission(at: message.frameInfo.request.url),
            service.allowsNativePermission(at: message.webView?.url) else { return (nil, nil) }
         let requestingPageURL = message.webView?.url

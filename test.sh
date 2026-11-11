@@ -3,13 +3,18 @@ set -euo pipefail
 
 ROOT="${0:A:h}"
 BUILD_DIR="$ROOT/.build/tests"
+INFO_PLIST="$ROOT/Resources/Info.plist"
 mkdir -p "$BUILD_DIR"
 
-xcrun swiftc \
-  -target arm64-apple-macos15.0 \
-  -swift-version 6 \
-  -strict-concurrency=complete \
-  -warnings-as-errors \
+# Keep in step with build.sh. Swift autolinks the frameworks each file imports.
+SWIFT_FLAGS=(
+  -target arm64-apple-macos15.0
+  -swift-version 6
+  -strict-concurrency=complete
+  -warnings-as-errors
+)
+
+xcrun swiftc "${SWIFT_FLAGS[@]}" \
   "$ROOT/Sources/Domain.swift" \
   "$ROOT/Sources/JavaScriptLiteral.swift" \
   "$ROOT/Sources/UpdateChecker.swift" \
@@ -21,18 +26,7 @@ xcrun swiftc \
 cd "$ROOT"
 "$BUILD_DIR/DuetTests"
 
-xcrun swiftc \
-  -target arm64-apple-macos15.0 \
-  -swift-version 6 \
-  -strict-concurrency=complete \
-  -warnings-as-errors \
-  -parse-as-library \
-  -framework SwiftUI \
-  -framework WebKit \
-  -framework AppKit \
-  -framework Combine \
-  -framework CoreLocation \
-  -framework UserNotifications \
+xcrun swiftc "${SWIFT_FLAGS[@]}" -parse-as-library \
   "$ROOT/Sources/Domain.swift" \
   "$ROOT/Sources/JavaScriptLiteral.swift" \
   "$ROOT/Sources/UpdateChecker.swift" \
@@ -50,32 +44,25 @@ xcrun swiftc \
 
 "$BUILD_DIR/HostLifecycleTests"
 
-xcrun swiftc \
-  -target arm64-apple-macos15.0 \
-  -swift-version 6 \
-  -strict-concurrency=complete \
-  -warnings-as-errors \
-  -typecheck \
-  "$ROOT"/Sources/*.swift
+# A full compile, not -typecheck: some concurrency diagnostics only run
+# after type checking.
+xcrun swiftc "${SWIFT_FLAGS[@]}" -parse-as-library "$ROOT"/Sources/*.swift -o "$BUILD_DIR/DuetCompileCheck"
 
-MICROPHONE_USAGE_DESCRIPTION=$(
-  plutil -extract NSMicrophoneUsageDescription raw "$ROOT/Resources/Info.plist"
-)
-if [[ -z "$MICROPHONE_USAGE_DESCRIPTION" ]]; then
-  echo "Missing NSMicrophoneUsageDescription in Resources/Info.plist" >&2
-  exit 1
-fi
+# plutil fails on a missing key, which set -e would turn into a bare exit.
+require_plist_text() {
+  local value
+  if ! value=$(plutil -extract "$1" raw "$INFO_PLIST" 2>/dev/null) || [[ -z "$value" ]]; then
+    echo "Missing $1 in Resources/Info.plist" >&2
+    exit 1
+  fi
+  print -r -- "$value"
+}
 
-LOCATION_USAGE_DESCRIPTION=$(
-  plutil -extract NSLocationUsageDescription raw "$ROOT/Resources/Info.plist"
-)
-if [[ -z "$LOCATION_USAGE_DESCRIPTION" ]]; then
-  echo "Missing NSLocationUsageDescription in Resources/Info.plist" >&2
-  exit 1
-fi
+require_plist_text NSMicrophoneUsageDescription >/dev/null
+require_plist_text NSLocationUsageDescription >/dev/null
 
-MARKETING_VERSION=$(plutil -extract CFBundleShortVersionString raw "$ROOT/Resources/Info.plist")
-BUILD_VERSION=$(plutil -extract CFBundleVersion raw "$ROOT/Resources/Info.plist")
+MARKETING_VERSION=$(require_plist_text CFBundleShortVersionString)
+BUILD_VERSION=$(require_plist_text CFBundleVersion)
 if [[ "$BUILD_VERSION" != "$MARKETING_VERSION" ]]; then
   echo "CFBundleVersion must match CFBundleShortVersionString for release builds." >&2
   exit 1

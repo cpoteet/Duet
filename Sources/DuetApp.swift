@@ -15,7 +15,7 @@ struct DuetApp: App {
         WindowGroup("Duet", id: "workspace") {
             ContentView(appState: appState)
                 .onAppear {
-                    applicationDelegate.configureQuickPrompt(with: appState) {
+                    applicationDelegate.configure(with: appState) {
                         openWindow(id: "workspace")
                     }
                     let applicationDelegate = applicationDelegate
@@ -55,7 +55,7 @@ struct DuetApp: App {
                 workspaceToggle("Both", target: .both, key: "3")
                 Divider()
                 Button("Equal Widths") {
-                    equalizePaneWidths?()
+                    equalizePaneWidths?.perform()
                 }
                 .disabled(equalizePaneWidths == nil)
             }

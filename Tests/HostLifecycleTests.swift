@@ -177,38 +177,34 @@ struct HostLifecycleTests {
         )
 
         expect(
-            NotificationMessageOriginPolicy.allows(
+            ChatService.chatGPT.acceptsBridgeMessage(
                 isMainFrame: true,
-                scheme: "https",
-                host: "chatgpt.com",
-                allowedHosts: ChatService.chatGPT.providerPageHosts
+                protocol: "https",
+                host: "chatgpt.com"
             ),
             "A provider main-frame origin should reach its notification bridge"
         )
         expect(
-            !NotificationMessageOriginPolicy.allows(
+            !ChatService.chatGPT.acceptsBridgeMessage(
                 isMainFrame: false,
-                scheme: "https",
-                host: "chatgpt.com",
-                allowedHosts: ChatService.chatGPT.providerPageHosts
+                protocol: "https",
+                host: "chatgpt.com"
             ),
             "A provider subframe must not reach the notification bridge"
         )
         expect(
-            !NotificationMessageOriginPolicy.allows(
+            !ChatService.chatGPT.acceptsBridgeMessage(
                 isMainFrame: true,
-                scheme: "https",
-                host: "chatgpt.com.evil.example",
-                allowedHosts: ChatService.chatGPT.providerPageHosts
+                protocol: "https",
+                host: "chatgpt.com.evil.example"
             ),
             "A spoofed provider suffix must not reach the notification bridge"
         )
         expect(
-            !NotificationMessageOriginPolicy.allows(
+            !ChatService.chatGPT.acceptsBridgeMessage(
                 isMainFrame: true,
-                scheme: "http",
-                host: "chatgpt.com",
-                allowedHosts: ChatService.chatGPT.providerPageHosts
+                protocol: "http",
+                host: "chatgpt.com"
             ),
             "A non-HTTPS provider origin must not reach the notification bridge"
         )
@@ -366,6 +362,43 @@ struct HostLifecycleTests {
         restoredWindow.orderOut(nil)
         DuetWindowRegistry.unregister(restoredWindow)
 
+        // A window reopened on another Space registers before it is visible.
+        let offscreenWindow = NSWindow(
+            contentRect: .init(x: 0, y: 0, width: 400, height: 400),
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        let offscreenHost = BrowserHostView(frame: offscreenWindow.contentView?.bounds ?? .zero)
+        let offscreenBrowser = BrowserController(service: .claude)
+        let offscreenWebView = offscreenBrowser.prepare()
+        offscreenHost.onWindowAttachment = {
+            offscreenHost.synchronizeHostedWebView(offscreenBrowser.webView)
+        }
+        offscreenWindow.contentView = offscreenHost
+        DuetWindowRegistry.register(offscreenWindow)
+        try? await Task.sleep(for: .milliseconds(20))
+        expect(
+            !offscreenWindow.isVisible && offscreenWebView.superview === offscreenHost,
+            "A registered workspace must mount its provider view before it becomes visible"
+        )
+        let takeoverWindow = NSWindow(
+            contentRect: .init(x: 0, y: 0, width: 400, height: 400),
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        takeoverWindow.orderFront(nil)
+        DuetWindowRegistry.register(takeoverWindow)
+        offscreenHost.clear()
+        offscreenHost.synchronizeHostedWebView(offscreenWebView)
+        expect(
+            offscreenWebView.superview == nil,
+            "A replaced workspace window must not claim a provider view"
+        )
+        takeoverWindow.orderOut(nil)
+        DuetWindowRegistry.unregister(takeoverWindow)
+
         let focusWindow = NSWindow(
             contentRect: .init(x: 0, y: 0, width: 400, height: 400),
             styleMask: [.titled],
@@ -395,6 +428,24 @@ struct HostLifecycleTests {
             focusWindow.firstResponder !== detachedFocusedWebView,
             "A browser host must resign its web view before detaching it from the window"
         )
+        // A quick single-to-split-and-back switch: SwiftUI keeps the split
+        // host alive while the single-pane host takes the view.
+        let survivingSplitHost = BrowserHostView(frame: NSRect(x: 0, y: 0, width: 200, height: 200))
+        let outgoingSingleHost = BrowserHostView(frame: NSRect(x: 0, y: 0, width: 400, height: 200))
+        let reclaimedWebView = WKWebView(frame: .zero, configuration: WKWebViewConfiguration())
+        survivingSplitHost.install(reclaimedWebView)
+        outgoingSingleHost.install(reclaimedWebView)
+        survivingSplitHost.install(reclaimedWebView)
+        expect(
+            reclaimedWebView.superview === survivingSplitHost,
+            "A host must take back a web view that another host moved away"
+        )
+        outgoingSingleHost.clear()
+        expect(
+            reclaimedWebView.superview === survivingSplitHost,
+            "Tearing down the outgoing host must not remove the reclaimed web view"
+        )
+
         let identifiedWorkspaceWindow = NSWindow(
             contentRect: .init(x: 0, y: 0, width: 400, height: 400),
             styleMask: [.titled],
@@ -409,6 +460,11 @@ struct HostLifecycleTests {
         expect(
             DuetWindowRegistry.workspaceWindow === identifiedWorkspaceWindow,
             "The workspace marker should register the exact workspace window for later restoration"
+        )
+        identifiedWorkspaceWindow.identifier = NSUserInterfaceItemIdentifier("workspace-AppWindow-1")
+        expect(
+            identifiedWorkspaceWindow.identifier == DuetWindowIdentifier.workspace,
+            "The workspace marker should restore its identifier when SwiftUI replaces it"
         )
 
         let windowSizeDefaultsName = "com.siolon.duet.tests.window-size.\(UUID().uuidString)"
@@ -494,6 +550,23 @@ struct HostLifecycleTests {
             "A replaced workspace must lose the identifier that permits provider hosting"
         )
         replacementWorkspaceWindow.orderOut(nil)
+        let restorableWindows = [identifiedWorkspaceWindow, existingVisibleWindow, replacementWorkspaceWindow]
+        expect(
+            DuetWindowRegistry.restorableWorkspaceWindow(in: restorableWindows, appIsHidden: true)
+                === replacementWorkspaceWindow,
+            "Revealing a hidden Duet should bring back its registered workspace, not open another"
+        )
+        expect(
+            DuetWindowRegistry.restorableWorkspaceWindow(in: restorableWindows, appIsHidden: false) == nil,
+            "An off-screen workspace outside a hidden app should not be treated as restorable"
+        )
+        expect(
+            DuetWindowRegistry.restorableWorkspaceWindow(
+                in: [identifiedWorkspaceWindow, existingVisibleWindow],
+                appIsHidden: true
+            ) == nil,
+            "A workspace window that no longer exists should not be restored"
+        )
         existingVisibleWindow.orderOut(nil)
         DuetWindowRegistry.unregister(replacementWorkspaceWindow)
 
@@ -859,7 +932,7 @@ struct HostLifecycleTests {
         )
         workspaceState.browserDidMount(.chatGPT)
         workspaceState.browserDidMount(.claude)
-        let splitWorkspaceMounted = await workspaceState.waitForQuickPromptWorkspaceMount(
+        let splitWorkspaceMounted = await workspaceState.waitForWorkspaceMount(
             for: .both,
             timeout: 0.01
         )
@@ -955,7 +1028,7 @@ struct HostLifecycleTests {
         workspaceState.browserDidMount(.chatGPT)
         workspaceState.browserDidMount(.claude)
         workspaceState.openQuickPromptWorkspace(for: .both)
-        let staleSplitWorkspaceMounted = await workspaceState.waitForQuickPromptWorkspaceMount(
+        let staleSplitWorkspaceMounted = await workspaceState.waitForWorkspaceMount(
             for: .both,
             timeout: 0.01
         )
@@ -965,7 +1038,7 @@ struct HostLifecycleTests {
         )
         workspaceState.browserDidMount(.chatGPT)
         workspaceState.browserDidMount(.claude)
-        let recreatedSplitWorkspaceMounted = await workspaceState.waitForQuickPromptWorkspaceMount(
+        let recreatedSplitWorkspaceMounted = await workspaceState.waitForWorkspaceMount(
             for: .both,
             timeout: 0.01
         )
@@ -974,7 +1047,7 @@ struct HostLifecycleTests {
         let singleQuickPromptState = AppState()
         singleQuickPromptState.openQuickPromptWorkspace(for: .service(.claude))
         singleQuickPromptState.browserDidMount(.chatGPT)
-        let wrongSingleWorkspaceMounted = await singleQuickPromptState.waitForQuickPromptWorkspaceMount(
+        let wrongSingleWorkspaceMounted = await singleQuickPromptState.waitForWorkspaceMount(
             for: .service(.claude),
             timeout: 0.01
         )
@@ -983,7 +1056,7 @@ struct HostLifecycleTests {
             "An unrelated browser mount must not start a single-provider Quick Prompt dispatch"
         )
         singleQuickPromptState.browserDidMount(.claude)
-        let singleWorkspaceMounted = await singleQuickPromptState.waitForQuickPromptWorkspaceMount(
+        let singleWorkspaceMounted = await singleQuickPromptState.waitForWorkspaceMount(
             for: .service(.claude),
             timeout: 0.01
         )
@@ -1023,7 +1096,7 @@ struct HostLifecycleTests {
         quickPromptDrawerState.setSplitView(true)
         expect(quickPromptDrawerState.isPromptDrawerOpen, "Entering split view by hand should still open the drawer after a Quick Prompt")
 
-        singleQuickPromptState.reportQuickPromptWorkspaceUnavailable(for: .service(.claude))
+        singleQuickPromptState.reportWorkspaceUnavailable(for: .service(.claude))
         expect(
             singleQuickPromptState.dispatchNotice?.results == [
                 PromptDispatchResult(service: .claude, outcome: .unavailable)
@@ -1294,7 +1367,7 @@ struct HostLifecycleTests {
         expect(fill.ok, "\(name) composer was not filled", failures: &failures)
 
         let beforeClick: Bool = try await evaluate(
-            adapter.submissionConfirmationScript(prompt: prompt),
+            adapter.submissionConfirmationScript(),
             in: webView
         )
         expect(!beforeClick, "\(name) reported submission before click", failures: &failures)
@@ -1303,7 +1376,7 @@ struct HostLifecycleTests {
         expect(submit.ok, "\(name) send control was not clicked", failures: &failures)
 
         let confirmed: Bool = try await evaluate(
-            adapter.submissionConfirmationScript(prompt: prompt),
+            adapter.submissionConfirmationScript(),
             in: webView
         )
         expect(
@@ -1318,7 +1391,7 @@ struct HostLifecycleTests {
                 in: webView
             ) as Bool
             let missingComposer: Bool = try await evaluate(
-                adapter.submissionConfirmationScript(prompt: prompt),
+                adapter.submissionConfirmationScript(),
                 in: webView
             )
             expect(!missingComposer, "A missing composer must not confirm during navigation", failures: &failures)
@@ -1338,7 +1411,7 @@ struct HostLifecycleTests {
                 in: webView
             ) as Bool
             let hiddenComposer: Bool = try await evaluate(
-                adapter.submissionConfirmationScript(prompt: prompt),
+                adapter.submissionConfirmationScript(),
                 in: webView
             )
             expect(!hiddenComposer, "A hidden composer must not confirm submission", failures: &failures)
@@ -1348,7 +1421,7 @@ struct HostLifecycleTests {
                 in: webView
             ) as Bool
             let replacementComposer: Bool = try await evaluate(
-                adapter.submissionConfirmationScript(prompt: prompt),
+                adapter.submissionConfirmationScript(),
                 in: webView
             )
             expect(!replacementComposer, "A visible replacement composer containing text must not confirm", failures: &failures)
@@ -1375,7 +1448,7 @@ struct HostLifecycleTests {
         let submit: ScriptResult = try await evaluate(adapter.submissionScript(prompt: prompt), in: webView)
         expect(submit.ok, "Delayed send control never became ready", failures: &failures)
         let confirmed: Bool = try await evaluate(
-            adapter.submissionConfirmationScript(prompt: prompt),
+            adapter.submissionConfirmationScript(),
             in: webView
         )
         expect(confirmed, "Delayed submission was not confirmed", failures: &failures)
@@ -1482,7 +1555,7 @@ struct HostLifecycleTests {
             "(() => { document.querySelector('textarea').value = 'Different draft'; return true; })()",
             in: webView
         ) as Bool
-        let editedConfirmation: Bool = try await evaluate(adapter.submissionConfirmationScript(prompt: prompt), in: webView)
+        let editedConfirmation: Bool = try await evaluate(adapter.submissionConfirmationScript(), in: webView)
         expect(!editedConfirmation, "A different composer draft must not confirm submission", failures: &failures)
         _ = try await evaluate(
             "(() => { document.querySelector('textarea').value = ''; return true; })()",
@@ -1490,14 +1563,14 @@ struct HostLifecycleTests {
         ) as Bool
         _ = try await evaluate(adapter.fillScript(prompt: prompt), in: webView) as ScriptResult
         let beforeClick: Bool = try await evaluate(
-            adapter.submissionConfirmationScript(prompt: prompt),
+            adapter.submissionConfirmationScript(),
             in: webView
         )
         expect(!beforeClick, "Refilling a repeated prompt must not confirm before the click", failures: &failures)
         let submit: ScriptResult = try await evaluate(adapter.submissionScript(prompt: prompt), in: webView)
         expect(submit.ok, "Repeated prompt send control was not clicked", failures: &failures)
         let confirmed: Bool = try await evaluate(
-            adapter.submissionConfirmationScript(prompt: prompt),
+            adapter.submissionConfirmationScript(),
             in: webView
         )
         expect(confirmed, "A filled and clicked repeated prompt should confirm submission", failures: &failures)

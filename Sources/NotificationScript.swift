@@ -5,8 +5,6 @@ enum NotificationPermission: String, Sendable {
     case undetermined = "default"
     case granted
     case denied
-
-    var domValue: String { rawValue }
 }
 
 /// A provider page's request to display one notification.
@@ -81,12 +79,10 @@ enum NotificationScript {
           if (window.__duetNotificationBridgeInstalled) return;
           const bridge = window.webkit?.messageHandlers?.\(handlerName);
           if (!bridge) return;
-          const allowedHosts = \(JavaScriptLiteral.array(allowedHosts));
-          const host = (location.hostname || "").toLowerCase();
-          if (!allowedHosts.some(domain => host === domain || host.endsWith("." + domain))) return;
+          if (!\(PageOriginScript.isAllowedHost(allowedHosts))) return;
           window.__duetNotificationBridgeInstalled = true;
 
-          let permission = \(JavaScriptLiteral.string(initialPermission.domValue));
+          let permission = \(JavaScriptLiteral.string(initialPermission.rawValue));
           const acceptPermission = value => {
             if (value === "granted" || value === "denied" || value === "default") permission = value;
             return permission;
@@ -174,9 +170,7 @@ enum NotificationScript {
           if (window.__duetResponseWatcherInstalled) return;
           const bridge = window.webkit?.messageHandlers?.\(handlerName);
           if (!bridge) return;
-          const allowedHosts = \(JavaScriptLiteral.array(allowedHosts));
-          const host = (location.hostname || "").toLowerCase();
-          if (!allowedHosts.some(domain => host === domain || host.endsWith("." + domain))) return;
+          if (!\(PageOriginScript.isAllowedHost(allowedHosts))) return;
           window.__duetResponseWatcherInstalled = true;
 
           const indicatorSelectors = \(JavaScriptLiteral.array(adapter.generationIndicatorSelectors));

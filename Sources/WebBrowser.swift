@@ -60,10 +60,12 @@ final class BrowserController: NSObject, ObservableObject {
         newWebView.navigationDelegate = self
         newWebView.uiDelegate = self
         // WKWebView otherwise paints an opaque white base before its document
-        // has a chance to render. Duet is a personal, non-App Store app and
-        // already uses a guarded private WebKit close hook for released pages,
-        // so use the matching KVC hook here to expose the native host canvas.
-        newWebView.setValue(false, forKey: "drawsBackground")
+        // has a chance to render. There's no public switch, so use WebKit's
+        // private setter, which KVC reaches through `drawsBackground`. Check
+        // for it first: KVC throws an exception for a key WebKit drops.
+        if newWebView.responds(to: NSSelectorFromString("_setDrawsBackground:")) {
+            newWebView.setValue(false, forKey: "drawsBackground")
+        }
         newWebView.underPageBackgroundColor = .clear
         webView = newWebView
         hasRetriedBlankInitialLoad = false
@@ -123,10 +125,10 @@ final class BrowserController: NSObject, ObservableObject {
 
     func dispatch(
         prompt: String,
-        startsNewConversation: Bool = false,
-        timeout: TimeInterval? = nil
+        startsNewConversation: Bool = false
     ) async -> PromptDispatchOutcome {
-        let readinessTimeout = timeout ?? (startsNewConversation ? 60 : phase.promptReadinessTimeout)
+        // A new conversation is a fresh page load, so give it the cold-load wait.
+        let readinessTimeout = startsNewConversation ? BrowserPhase.loading.promptReadinessTimeout : phase.promptReadinessTimeout
         if startsNewConversation {
             openNewConversation()
         } else {
@@ -155,10 +157,7 @@ final class BrowserController: NSObject, ObservableObject {
                 }
                 return .failed("Not sent, couldn't fill its message box")
             }
-            return await waitForSubmission(
-                prompt: prompt,
-                timeout: 4
-            )
+            return await waitForSubmission(prompt: prompt)
         } catch {
             return .failed("Not sent, couldn't reach the page")
         }
@@ -243,6 +242,9 @@ final class BrowserController: NSObject, ObservableObject {
         guard !hasRetriedBlankInitialLoad, webView === loadedWebView,
               let script = adapter.blankPageScript() else { return }
 
+        // `didFinish` arrives before the provider's client-side app renders,
+        // and nothing signals when it has. Give it a moment before treating
+        // the document as blank.
         try? await Task.sleep(for: .milliseconds(800))
         guard webView === loadedWebView else { return }
         guard (try? await evaluate(script, as: Bool.self)) == true, webView === loadedWebView else { return }
@@ -328,7 +330,7 @@ final class BrowserController: NSObject, ObservableObject {
         currentPageURL: URL?,
         type: WKMediaCaptureType
     ) -> WKPermissionDecision {
-        guard service.allowsMediaCapture(originProtocol: originProtocol, host: originHost),
+        guard service.isProviderPageOrigin(protocol: originProtocol, host: originHost),
               service.allowsNativePermission(at: frameURL),
               service.allowsNativePermission(at: currentPageURL) else {
             return .deny
@@ -372,11 +374,13 @@ final class BrowserController: NSObject, ObservableObject {
             : .failed("Not sent, the send was cancelled")
     }
 
-    private func waitForSubmission(
-        prompt: String,
-        timeout: TimeInterval
-    ) async -> PromptDispatchOutcome {
-        var deadline = Date().addingTimeInterval(timeout)
+    /// How long a filled composer has to show an enabled Send button.
+    private static let sendButtonTimeout: TimeInterval = 4
+    /// How long the composer has to clear after Send is clicked.
+    private static let submissionConfirmationTimeout: TimeInterval = 10
+
+    private func waitForSubmission(prompt: String) async -> PromptDispatchOutcome {
+        var deadline = Date().addingTimeInterval(Self.sendButtonTimeout)
         var didClickSend = false
         while Date() < deadline {
             if Task.isCancelled { return cancelledOutcome(didClickSend: didClickSend) }
@@ -388,7 +392,7 @@ final class BrowserController: NSObject, ObservableObject {
                 }
                 if didClickSend {
                     if try await evaluate(
-                        adapter.submissionConfirmationScript(prompt: prompt),
+                        adapter.submissionConfirmationScript(),
                         as: Bool.self
                     ) {
                         return .sent
@@ -397,7 +401,7 @@ final class BrowserController: NSObject, ObservableObject {
                     let result = try await evaluate(adapter.submissionScript(prompt: prompt), as: ScriptResult.self)
                     didClickSend = result.ok
                     if didClickSend {
-                        deadline = Date().addingTimeInterval(10)
+                        deadline = Date().addingTimeInterval(Self.submissionConfirmationTimeout)
                     }
                 }
             } catch {
@@ -457,113 +461,97 @@ private struct ScriptResult: Decodable, Sendable {
 }
 
 extension BrowserController: WKNavigationDelegate {
-    nonisolated func webView(
+    func webView(
         _ webView: WKWebView,
         decidePolicyFor navigationAction: WKNavigationAction,
         decisionHandler: @escaping @MainActor (WKNavigationActionPolicy) -> Void
     ) {
-        MainActor.assumeIsolated {
-            // Provider-generated files commonly use blob: URLs, which are not
-            // valid page destinations. Honor WebKit's explicit download signal
-            // before applying the normal provider-navigation allowlist.
-            if navigationAction.shouldPerformDownload {
-                decisionHandler(.download)
-                return
-            }
-            if navigationAction.targetFrame?.isMainFrame == false {
-                decisionHandler(.allow)
-                return
-            }
-            guard let url = navigationAction.request.url else {
-                decisionHandler(.cancel)
-                return
-            }
-            if self.service.allowsNavigation(to: url) {
-                decisionHandler(.allow)
-            } else {
-                decisionHandler(.cancel)
-                self.openExternalURLIfSafe(url)
-            }
+        // Provider-generated files commonly use blob: URLs, which are not
+        // valid page destinations. Honor WebKit's explicit download signal
+        // before applying the normal provider-navigation allowlist.
+        if navigationAction.shouldPerformDownload {
+            decisionHandler(.download)
+            return
+        }
+        if navigationAction.targetFrame?.isMainFrame == false {
+            decisionHandler(.allow)
+            return
+        }
+        guard let url = navigationAction.request.url else {
+            decisionHandler(.cancel)
+            return
+        }
+        if self.service.allowsNavigation(to: url) {
+            decisionHandler(.allow)
+        } else {
+            decisionHandler(.cancel)
+            self.openExternalURLIfSafe(url)
         }
     }
 
-    nonisolated func webView(
+    func webView(
         _ webView: WKWebView,
         decidePolicyFor navigationResponse: WKNavigationResponse,
         decisionHandler: @escaping @MainActor (WKNavigationResponsePolicy) -> Void
     ) {
-        MainActor.assumeIsolated {
-            let contentDisposition = (navigationResponse.response as? HTTPURLResponse)?
-                .value(forHTTPHeaderField: "Content-Disposition")
-            if Self.shouldDownloadNavigationResponse(
-                canShowMIMEType: navigationResponse.canShowMIMEType,
-                contentDisposition: contentDisposition
-            ) {
-                decisionHandler(.download)
-            } else {
-                decisionHandler(.allow)
-            }
+        let contentDisposition = (navigationResponse.response as? HTTPURLResponse)?
+            .value(forHTTPHeaderField: "Content-Disposition")
+        if Self.shouldDownloadNavigationResponse(
+            canShowMIMEType: navigationResponse.canShowMIMEType,
+            contentDisposition: contentDisposition
+        ) {
+            decisionHandler(.download)
+        } else {
+            decisionHandler(.allow)
         }
     }
 
-    nonisolated func webView(
+    func webView(
         _ webView: WKWebView,
         navigationAction: WKNavigationAction,
         didBecome download: WKDownload
     ) {
-        MainActor.assumeIsolated {
-            download.delegate = self
-            if navigationAction.targetFrame?.isMainFrame == true {
-                self.mainFrameDownload = download
-                self.restorePhaseForMainFrameDownload()
-            }
+        download.delegate = self
+        if navigationAction.targetFrame?.isMainFrame == true {
+            self.mainFrameDownload = download
+            self.restorePhaseForMainFrameDownload()
         }
     }
 
-    nonisolated func webView(
+    func webView(
         _ webView: WKWebView,
         navigationResponse: WKNavigationResponse,
         didBecome download: WKDownload
     ) {
-        MainActor.assumeIsolated {
-            download.delegate = self
-            if navigationResponse.isForMainFrame {
-                self.mainFrameDownload = download
-                self.restorePhaseForMainFrameDownload()
-            }
+        download.delegate = self
+        if navigationResponse.isForMainFrame {
+            self.mainFrameDownload = download
+            self.restorePhaseForMainFrameDownload()
         }
     }
 
-    nonisolated func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
-        MainActor.assumeIsolated {
-            guard self.webView === webView else { return }
-            self.beginProvisionalNavigation()
+    func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
+        guard self.webView === webView else { return }
+        self.beginProvisionalNavigation()
+    }
+
+    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        guard self.webView === webView else { return }
+        self.completeNavigation()
+        Task { @MainActor in
+            await self.detectVerificationChallenge(in: webView)
+            await self.retryBlankInitialLoadIfNeeded(in: webView)
         }
     }
 
-    nonisolated func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-        MainActor.assumeIsolated {
-            guard self.webView === webView else { return }
-            self.completeNavigation()
-            Task { @MainActor in
-                await self.detectVerificationChallenge(in: webView)
-                await self.retryBlankInitialLoadIfNeeded(in: webView)
-            }
-        }
+    func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
+        guard self.webView === webView else { return }
+        self.handleNavigationFailure(error)
     }
 
-    nonisolated func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
-        MainActor.assumeIsolated {
-            guard self.webView === webView else { return }
-            self.handleNavigationFailure(error)
-        }
-    }
-
-    nonisolated func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
-        MainActor.assumeIsolated {
-            guard self.webView === webView else { return }
-            self.handleNavigationFailure(error)
-        }
+    func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
+        guard self.webView === webView else { return }
+        self.handleNavigationFailure(error)
     }
 
     private func openExternalURLIfSafe(_ url: URL) {
@@ -679,53 +667,49 @@ extension BrowserController: WebPagePrintPresenting {
 }
 
 extension BrowserController: WKUIDelegate {
-    nonisolated func webView(
+    func webView(
         _ webView: WKWebView,
         requestMediaCapturePermissionFor origin: WKSecurityOrigin,
         initiatedByFrame frame: WKFrameInfo,
         type: WKMediaCaptureType,
         decisionHandler: @escaping @MainActor (WKPermissionDecision) -> Void
     ) {
-        MainActor.assumeIsolated {
-            guard self.webView === webView else {
-                decisionHandler(.deny)
-                return
-            }
-            decisionHandler(Self.mediaCapturePermissionDecision(
-                service: self.service,
-                originProtocol: origin.protocol,
-                originHost: origin.host,
-                frameURL: frame.request.url,
-                currentPageURL: webView.url,
-                type: type
-            ))
+        guard self.webView === webView else {
+            decisionHandler(.deny)
+            return
         }
+        decisionHandler(Self.mediaCapturePermissionDecision(
+            service: self.service,
+            originProtocol: origin.protocol,
+            originHost: origin.host,
+            frameURL: frame.request.url,
+            currentPageURL: webView.url,
+            type: type
+        ))
     }
 
-    nonisolated func webView(
+    func webView(
         _ webView: WKWebView,
         runOpenPanelWith parameters: WKOpenPanelParameters,
         initiatedByFrame frame: WKFrameInfo,
         completionHandler: @escaping @MainActor ([URL]?) -> Void
     ) {
-        MainActor.assumeIsolated {
-            let panel = NSOpenPanel()
-            panel.allowsMultipleSelection = parameters.allowsMultipleSelection
-            panel.canChooseDirectories = parameters.allowsDirectories
-            panel.canChooseFiles = !parameters.allowsDirectories
-            panel.resolvesAliases = true
+        let panel = NSOpenPanel()
+        panel.allowsMultipleSelection = parameters.allowsMultipleSelection
+        panel.canChooseDirectories = parameters.allowsDirectories
+        panel.canChooseFiles = !parameters.allowsDirectories
+        panel.resolvesAliases = true
 
-            if let window = webView.window {
-                panel.beginSheetModal(for: window) { response in
-                    completionHandler(response == .OK ? panel.urls : nil)
-                }
-            } else {
-                completionHandler(panel.runModal() == .OK ? panel.urls : nil)
+        if let window = webView.window {
+            panel.beginSheetModal(for: window) { response in
+                completionHandler(response == .OK ? panel.urls : nil)
             }
+        } else {
+            completionHandler(panel.runModal() == .OK ? panel.urls : nil)
         }
     }
 
-    nonisolated func webView(
+    func webView(
         _ webView: WKWebView,
         createWebViewWith configuration: WKWebViewConfiguration,
         for navigationAction: WKNavigationAction,
@@ -734,12 +718,10 @@ extension BrowserController: WKUIDelegate {
         // Disposing a provider-created WKWebView window can crash on macOS 26.
         // Use the system browser for new windows, which also gives those flows
         // their normal browser popup and authentication behavior.
-        MainActor.assumeIsolated {
-            if let url = navigationAction.request.url {
-                self.openExternalURLIfSafe(url)
-            }
-            return nil
+        if let url = navigationAction.request.url {
+            self.openExternalURLIfSafe(url)
         }
+        return nil
     }
 }
 
@@ -772,6 +754,7 @@ final class BrowserHostView: NSView {
     private weak var hostedWebView: WKWebView?
     private var acceptsKeyboardInput = true
     private var windowAttachmentTask: Task<Void, Never>?
+    private var isWaitingForRegistration = false
     var onWindowAttachment: (() -> Void)?
 
     override init(frame frameRect: NSRect) {
@@ -795,6 +778,7 @@ final class BrowserHostView: NSView {
             scheduleWindowAttachment()
         } else {
             windowAttachmentTask?.cancel()
+            stopWaitingForWorkspaceRegistration()
         }
     }
 
@@ -806,9 +790,16 @@ final class BrowserHostView: NSView {
     }
 
     func install(_ webView: WKWebView) {
-        guard hostedWebView !== webView else { return }
-        prepareHostedWebViewForDetachment()
-        hostedWebView?.removeFromSuperview()
+        // Check where the view actually is, not what this host last held:
+        // another host may have taken it since. During a quick switch
+        // between layouts SwiftUI keeps the outgoing host alive, so a host
+        // that skipped reclaiming its view left that view inside a host
+        // about to be torn down, and the pane went blank.
+        guard webView.superview !== self else { return }
+        if let previousWebView = hostedWebView, previousWebView !== webView, previousWebView.superview === self {
+            prepareHostedWebViewForDetachment()
+            previousWebView.removeFromSuperview()
+        }
         hostedWebView = webView
         webView.frame = bounds
         webView.autoresizingMask = [.width, .height]
@@ -824,6 +815,7 @@ final class BrowserHostView: NSView {
     func clear() {
         windowAttachmentTask?.cancel()
         windowAttachmentTask = nil
+        stopWaitingForWorkspaceRegistration()
         // During a switch from a single pane to split view, SwiftUI may move
         // this WKWebView into its replacement host before dismantling this
         // host. Only remove a view we still own; otherwise the old host tears
@@ -852,22 +844,54 @@ final class BrowserHostView: NSView {
     /// AppKit can attach or update this host while SwiftUI is still rendering.
     /// Defer activation and mount bookkeeping to the next main-actor turn so
     /// those callbacks never publish observable state from `updateNSView`.
+    /// Repeated calls in one turn coalesce into a single attachment.
     func scheduleWindowAttachment() {
         windowAttachmentTask?.cancel()
         windowAttachmentTask = Task { @MainActor [weak self] in
-            for _ in 0..<40 {
-                await Task.yield()
-                guard !Task.isCancelled, let self, let window = self.window else { return }
-                if DuetWindowRegistry.isActiveWorkspaceWindow(window) {
-                    self.resignHostedFirstResponderIfNeeded()
-                    self.onWindowAttachment?()
-                    self.windowAttachmentTask = nil
-                    return
-                }
-                try? await Task.sleep(for: .milliseconds(50))
-            }
-            self?.windowAttachmentTask = nil
+            await Task.yield()
+            guard !Task.isCancelled, let self else { return }
+            self.windowAttachmentTask = nil
+            self.attachIfActiveWorkspace()
         }
+    }
+
+    /// A reopened window's hosts can arrive before the window registers as
+    /// the workspace. Until it does, wait for the registration.
+    private func attachIfActiveWorkspace() {
+        guard let window else { return }
+        guard DuetWindowRegistry.isActiveWorkspaceWindow(window) else {
+            waitForWorkspaceRegistration()
+            return
+        }
+        stopWaitingForWorkspaceRegistration()
+        resignHostedFirstResponderIfNeeded()
+        onWindowAttachment?()
+    }
+
+    private func waitForWorkspaceRegistration() {
+        guard !isWaitingForRegistration else { return }
+        isWaitingForRegistration = true
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(workspaceDidRegister),
+            name: DuetWindowRegistry.didRegisterWorkspaceNotification,
+            object: nil
+        )
+    }
+
+    private func stopWaitingForWorkspaceRegistration() {
+        guard isWaitingForRegistration else { return }
+        isWaitingForRegistration = false
+        NotificationCenter.default.removeObserver(
+            self,
+            name: DuetWindowRegistry.didRegisterWorkspaceNotification,
+            object: nil
+        )
+    }
+
+    @objc private func workspaceDidRegister(_ notification: Notification) {
+        guard let registeredWindow = notification.object as? NSWindow, registeredWindow === window else { return }
+        scheduleWindowAttachment()
     }
 
     private func resignHostedFirstResponderIfNeeded() {
@@ -944,6 +968,9 @@ struct BrowserView: NSViewRepresentable {
             nsView.clear()
         }
         nsView.setAcceptsKeyboardInput(acceptsKeyboardInput)
+        // The same host survives a release and re-prepare of its web view
+        // (Quick Prompt does this), so every update re-attaches and reports
+        // the mount again. Both steps do nothing when nothing changed.
         if nsView.window != nil {
             nsView.scheduleWindowAttachment()
         }

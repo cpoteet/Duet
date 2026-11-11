@@ -1,6 +1,8 @@
 import Foundation
 
 struct ProviderAdapter {
+    /// The provider's own app hosts, which page scripts check before running.
+    let pageHosts: [String]
     let composerSelectors: [String]
     let sendButtonSelectors: [String]
     /// Elements present only while the provider is generating a response.
@@ -10,6 +12,10 @@ struct ProviderAdapter {
     /// A provider-owned file input used to bridge WebKit file drops through
     /// the same upload path as the provider's working file picker.
     let fileDropInputSelector: String?
+    /// Text that marks the printable card around a provider Print button that
+    /// doesn't call `window.print()`, such as Claude's recipe cards. `nil`
+    /// leaves Print buttons alone and bridges only `window.print()`.
+    let printableRegionMarkers: [String]?
     /// The provider sits behind an interstitial bot check (Cloudflare) that
     /// can finish loading without showing usable app UI in an embedded view.
     let detectsVerificationChallenge: Bool
@@ -21,6 +27,7 @@ struct ProviderAdapter {
         switch service {
         case .chatGPT:
             ProviderAdapter(
+                pageHosts: service.providerPageHosts,
                 composerSelectors: [
                     "#prompt-textarea",
                     "textarea[data-id='root']",
@@ -40,11 +47,13 @@ struct ProviderAdapter {
                 generationControlScopeSelector: "[class*='ComposerLayoutRoot-'], form",
                 generationControlSelectors: ["button[aria-label^='Stop' i]"],
                 fileDropInputSelector: nil,
+                printableRegionMarkers: nil,
                 detectsVerificationChallenge: false,
                 retriesBlankInitialLoad: false
             )
         case .claude:
             ProviderAdapter(
+                pageHosts: service.providerPageHosts,
                 composerSelectors: [
                     "div[contenteditable='true'][role='textbox']",
                     "[contenteditable='true'][data-placeholder]",
@@ -64,6 +73,7 @@ struct ProviderAdapter {
                 generationControlScopeSelector: ".relative.w-full.min-w-0, form",
                 generationControlSelectors: ["button[aria-label^='Stop' i]"],
                 fileDropInputSelector: "input[type='file'][data-testid='file-upload']",
+                printableRegionMarkers: ["ingredients", "steps"],
                 detectsVerificationChallenge: true,
                 retriesBlankInitialLoad: true
             )
@@ -79,10 +89,8 @@ struct ProviderAdapter {
         let encodedSelector = JavaScriptLiteral.string(fileDropInputSelector)
         return """
         (() => {
-          const hostname = location.hostname.toLowerCase();
-          const isTrustedClaudePage = location.protocol === 'https:' &&
-            (hostname === 'claude.ai' || hostname.endsWith('.claude.ai'));
-          if (!isTrustedClaudePage || window.__duetFileDropCompatibilityInstalled) return;
+          const isProviderPage = location.protocol === 'https:' && \(PageOriginScript.isAllowedHost(pageHosts));
+          if (!isProviderPage || window.__duetFileDropCompatibilityInstalled) return;
           window.__duetFileDropCompatibilityInstalled = true;
 
           const findUploadInput = () => {
@@ -128,14 +136,17 @@ struct ProviderAdapter {
     }
 
     /// Returns `true` when the loaded page is a bot-check interstitial rather
-    /// than the provider's app, or `nil` when this provider has none.
+    /// than the provider's app, or `nil` when this provider has none. A page
+    /// with a usable composer is the app, whatever its title or text says.
     func verificationChallengeScript() -> String? {
         guard detectsVerificationChallenge else { return nil }
         return """
         (() => {
+          \(composerHelpers)
+          if (findComposer()) return false;
           const title = (document.title || '').toLowerCase();
           const text = (document.body?.innerText || '').slice(0, 1500).toLowerCase();
-          const hasChallenge = Boolean(document.querySelector('#challenge-error-text, [data-cf-beacon], iframe[src*="challenges.cloudflare.com"]'));
+          const hasChallenge = Boolean(document.querySelector('#challenge-error-text, iframe[src*="challenges.cloudflare.com"]'));
           return hasChallenge || title.includes('just a moment') || text.includes('enable javascript and cookies');
         })()
         """
@@ -264,16 +275,14 @@ struct ProviderAdapter {
         """
     }
 
-    func submissionConfirmationScript(prompt: String) -> String {
-        let encodedPrompt = JavaScriptLiteral.string(prompt)
-        return """
+    /// The composer clearing after Send is the confirmation that the
+    /// provider accepted the prompt.
+    func submissionConfirmationScript() -> String {
+        """
         (() => {
-          const normalize = text => text.replace(/\\s+/g, ' ').trim();
-          const prompt = normalize(\(encodedPrompt));
           \(composerHelpers)
           const composer = findComposer();
-          if (!composer) return false;
-          return prompt.length > 0 && normalize(composerText(composer)).length === 0;
+          return Boolean(composer) && composerText(composer).trim().length === 0;
         })()
         """
     }

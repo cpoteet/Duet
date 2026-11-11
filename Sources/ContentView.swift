@@ -130,10 +130,6 @@ struct ContentView: View {
         VStack(spacing: 30) {
             Spacer(minLength: 56)
 
-            Text("Choose a tool")
-                .font(.system(size: 26, weight: .semibold))
-                .foregroundStyle(palette.primaryText)
-
             HStack(spacing: 16) {
                 launchChoice(.chatGPT)
                 launchChoice(.claude)

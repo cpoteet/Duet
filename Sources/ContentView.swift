@@ -328,9 +328,14 @@ struct ContentView: View {
             // once the panes report a mount, not after the animation: taking
             // down the outgoing panes only moves focus that a page still
             // holds, and by then the drawer has it.
+            let userFocusEvents = UserFocusEventMonitor()
+            defer { userFocusEvents.stop() }
             _ = await appState.waitForWorkspaceMount(for: appState.isSplitView ? .both : .current)
-            guard !Task.isCancelled else { return }
-            isDrawerPromptFocused = true
+            await PromptFocus.take(
+                setFocused: { isDrawerPromptFocused = $0 },
+                isFocused: { isDrawerPromptFocused && !appState.providerPageHoldsKeyboardFocus },
+                userMovedFocus: { userFocusEvents.sawUserFocusEvent }
+            )
         }
         .onChange(of: appState.promptFocusRequest) {
             // The focus state may still read true after a page took first

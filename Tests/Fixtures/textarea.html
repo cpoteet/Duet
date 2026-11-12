@@ -1,9 +1,13 @@
 <!doctype html>
 <html><body>
-<textarea aria-label="Message"></textarea><button aria-label="Send prompt">Send</button>
+<textarea aria-label="Message"></textarea>
 <script>
+// Like the providers, send on a trusted Return keypress. A script-made
+// KeyboardEvent isn't trusted, so it can't send.
 const composer = document.querySelector('textarea');
-document.querySelector('button').addEventListener('click', () => {
+composer.addEventListener('keydown', event => {
+  if (event.key !== 'Enter' || event.shiftKey || !event.isTrusted) return;
+  event.preventDefault();
   const message = document.createElement('div');
   message.dataset.messageAuthorRole = 'user';
   message.textContent = composer.value;

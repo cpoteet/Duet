@@ -159,6 +159,11 @@ enum NotificationScript {
     /// reports it over the bridge. Providers whose sites refuse to use the
     /// in-page Notification API (they require an unobtainable Web Push
     /// subscription) still get native completion notifications this way.
+    ///
+    /// The page lookups stay: WebKit doesn't expose a page's network activity
+    /// or streaming state, so only the page shows that a response is being
+    /// generated. The adapter keeps them to test IDs, data attributes, and
+    /// ARIA labels inside the composer's semantic container.
     static func responseWatcherSource(
         adapter: ProviderAdapter,
         allowedHosts: [String],

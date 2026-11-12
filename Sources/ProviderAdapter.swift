@@ -3,8 +3,18 @@ import Foundation
 struct ProviderAdapter {
     /// The provider's own app hosts, which page scripts check before running.
     let pageHosts: [String]
+    /// Duet still finds the composer by selector: there's no native way to
+    /// learn which element is the provider's editor. Fill needs it to refuse a
+    /// composer that already holds a draft, Send needs it to focus the
+    /// composer before pressing Return, and confirmation needs it to see the
+    /// composer clear. There's no Send button selector: Duet sends with a real
+    /// Return keypress instead (`ProviderWebView.pressReturnKey()`).
     let composerSelectors: [String]
-    let sendButtonSelectors: [String]
+    /// The path component in front of a conversation ID, such as `c` in
+    /// `/c/<id>`. A page that moves onto a conversation path after Return
+    /// started a new conversation, which confirms the send without reading
+    /// the page.
+    let conversationPathComponent: String
     /// Elements present only while the provider is generating a response.
     let generationIndicatorSelectors: [String]
     /// The composer's own semantic container (`form` or `fieldset`). A Stop
@@ -38,13 +48,9 @@ struct ProviderAdapter {
                     "textarea",
                     "[contenteditable='true'][role='textbox']"
                 ],
-                sendButtonSelectors: [
-                    "button[data-testid='send-button']",
-                    "button[data-testid*='send']",
-                    "button[aria-label='Send prompt']",
-                    "button[aria-label*='Send']",
-                    "button[type='submit']"
-                ],
+                // Conversations live at /c/<id>, including inside a GPT or
+                // project (/g/<id>/c/<id>).
+                conversationPathComponent: "c",
                 // ChatGPT's Stop button has no test ID, only an aria-label, so
                 // the scoped Stop-label check below is its only indicator.
                 generationIndicatorSelectors: [],
@@ -58,18 +64,17 @@ struct ProviderAdapter {
         case .claude:
             ProviderAdapter(
                 pageHosts: service.providerPageHosts,
+                // No plain textarea: while a page loads, Claude shows a
+                // stand-in textarea (#static-composer-input) that swallows
+                // Return until its real contenteditable editor mounts and
+                // takes over the text. Waiting for the editor keeps Duet from
+                // pressing Return into the stand-in.
                 composerSelectors: [
                     "div[contenteditable='true'][role='textbox']",
                     "[contenteditable='true'][data-placeholder]",
-                    "div[contenteditable='true']",
-                    "textarea"
+                    "div[contenteditable='true']"
                 ],
-                sendButtonSelectors: [
-                    "button[aria-label='Send message']",
-                    "button[aria-label*='Send']",
-                    "button[data-testid*='send']",
-                    "button[type='submit']"
-                ],
+                conversationPathComponent: "chat",
                 generationIndicatorSelectors: [
                     "[data-is-streaming='true']",
                     "button[data-testid='chat-input-stop']"
@@ -88,6 +93,9 @@ struct ProviderAdapter {
     /// which can return no entries for Finder drops in an embedded WKWebView.
     /// Its file picker reads the standard input `files` list and works. Route
     /// user-initiated file drops through that same provider-owned input.
+    ///
+    /// The input lookup stays: the fix is to hand files to that exact input,
+    /// and WebKit has no native way to name it. It uses Claude's test ID.
     func fileDropCompatibilityScript() -> String? {
         guard let fileDropInputSelector else { return nil }
         let encodedSelector = JavaScriptLiteral.string(fileDropInputSelector)
@@ -142,6 +150,10 @@ struct ProviderAdapter {
     /// Returns `true` when the loaded page is a bot-check interstitial rather
     /// than the provider's app, or `nil` when this provider has none. A page
     /// with a usable composer is the app, whatever its title or text says.
+    ///
+    /// The page check stays for now. The challenge's HTTP response could
+    /// replace the challenge-element lookup, but that needs checking against
+    /// the live challenge first.
     func verificationChallengeScript() -> String? {
         guard detectsVerificationChallenge else { return nil }
         return """
@@ -158,6 +170,10 @@ struct ProviderAdapter {
 
     /// Returns `true` when the loaded document has no app content at all, or
     /// `nil` when this provider doesn't retry blank loads.
+    ///
+    /// The page check stays: `didFinish` fires before the provider's
+    /// client-side app renders, and nothing native reports what it rendered.
+    /// It looks only for text and semantic elements, never provider markup.
     func blankPageScript() -> String? {
         guard retriesBlankInitialLoad else { return nil }
         return """
@@ -191,6 +207,8 @@ struct ProviderAdapter {
         """
     }
 
+    /// A visible composer means the provider's app is ready for a prompt.
+    /// The lookup stays: no native event says a client-side editor mounted.
     func readinessScript() -> String {
         """
         (() => {
@@ -200,6 +218,11 @@ struct ProviderAdapter {
         """
     }
 
+    /// Sign-in pages on their own hosts and paths are caught by URL
+    /// (`ChatService.isAuthenticationPage`). This page check stays for the
+    /// signed-out landing pages providers serve at their app URLs, which no
+    /// URL or native signal tells apart. It reads links, buttons, and forms by
+    /// destination and accessible label, not provider markup.
     func loginRequiredScript() -> String {
         """
         (() => {
@@ -253,36 +276,41 @@ struct ProviderAdapter {
         """
     }
 
-    func submissionScript(prompt: String) -> String {
+    /// Readies the composer for Duet's Return keypress: it must still hold
+    /// exactly the filled prompt, and it must have keyboard focus inside the
+    /// page, or Return would land on whatever else is focused.
+    func returnKeyTargetScript(prompt: String) -> String {
         let encodedPrompt = JavaScriptLiteral.string(prompt)
         return """
         (() => {
           const normalize = text => text.replace(/\\s+/g, ' ').trim();
           const prompt = normalize(\(encodedPrompt));
-          const sendButtonSelectors = \(JavaScriptLiteral.array(sendButtonSelectors));
           \(composerHelpers)
           const composer = findComposer();
           if (!composer || normalize(composerText(composer)) !== prompt) return { ok: false, reason: 'composer-missing-prompt' };
-          // Use the Send buttons nearest the composer: walk up until an
-          // ancestor holds any candidate, so a broad fallback selector can't
-          // match some other form's button elsewhere on the page.
-          const ready = button => isVisible(button) && !button.disabled && button.getAttribute('aria-disabled') !== 'true';
-          let sendButton = null;
-          for (let scope = composer.parentElement; scope; scope = scope.parentElement) {
-            const candidates = sendButtonSelectors.flatMap(selector => Array.from(scope.querySelectorAll(selector))).filter(isVisible);
-            if (candidates.length > 0) {
-              sendButton = candidates.find(ready) || null;
-              break;
-            }
-          }
-          if (!sendButton) return { ok: false, reason: 'send-button-not-ready' };
-          sendButton.click();
+          const hasFocus = () => composer === document.activeElement || composer.contains(document.activeElement);
+          if (!hasFocus()) composer.focus();
+          if (!hasFocus()) return { ok: false, reason: 'composer-not-focused' };
           return { ok: true };
         })()
         """
     }
 
-    /// The composer clearing after Send is the confirmation that the
+    /// Whether the page moved from somewhere else onto a conversation, which
+    /// is how a send in a new conversation shows up in the URL. A send in an
+    /// existing conversation keeps its URL, so it confirms through the
+    /// composer instead.
+    func startedConversation(from previousURL: URL?, to currentURL: URL?) -> Bool {
+        !isConversationPage(previousURL) && isConversationPage(currentURL)
+    }
+
+    func isConversationPage(_ url: URL?) -> Bool {
+        guard let path = url?.path else { return false }
+        let components = path.split(separator: "/")
+        return components.indices.dropLast().contains { components[$0] == conversationPathComponent }
+    }
+
+    /// The composer clearing after Return is the confirmation that the
     /// provider accepted the prompt.
     func submissionConfirmationScript() -> String {
         """
@@ -290,6 +318,23 @@ struct ProviderAdapter {
           \(composerHelpers)
           const composer = findComposer();
           return Boolean(composer) && composerText(composer).trim().length === 0;
+        })()
+        """
+    }
+
+    /// Whether the composer still holds the prompt after Return. Providers
+    /// clear the composer when they take a prompt, so a composer that still
+    /// holds it means Return didn't send: the provider ignored it, or a
+    /// provider setting makes Return add a new line instead. Whitespace is
+    /// normalized, so a line Return added still counts as the prompt.
+    func composerHoldsPromptScript(prompt: String) -> String {
+        let encodedPrompt = JavaScriptLiteral.string(prompt)
+        return """
+        (() => {
+          const normalize = text => text.replace(/\\s+/g, ' ').trim();
+          \(composerHelpers)
+          const composer = findComposer();
+          return Boolean(composer) && normalize(composerText(composer)) === normalize(\(encodedPrompt));
         })()
         """
     }

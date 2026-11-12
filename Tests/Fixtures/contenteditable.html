@@ -1,9 +1,12 @@
 <!doctype html>
 <html><body>
-<div contenteditable="true" role="textbox"></div><button aria-label="Send message">Send</button>
+<div contenteditable="true" role="textbox"></div>
 <script>
+// Like the providers, send on a trusted Return keypress.
 const composer = document.querySelector('[contenteditable]');
-document.querySelector('button').addEventListener('click', () => {
+composer.addEventListener('keydown', event => {
+  if (event.key !== 'Enter' || event.shiftKey || !event.isTrusted) return;
+  event.preventDefault();
   const message = document.createElement('div');
   message.dataset.testid = 'user-message';
   message.textContent = composer.innerText;

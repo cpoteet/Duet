@@ -23,6 +23,10 @@ final class BrowserController: NSObject, ObservableObject {
     private lazy var locationBridge = LocationBridge(service: service)
     private lazy var printingBridge = PrintingBridge(service: service, presenter: self)
     private var hasRetriedBlankInitialLoad = false
+    /// Set while a send holds the keyboard focus lease.
+    private var holdsKeyboardFocus = false
+    /// Set while a send holds keyboard focus that belongs to the prompt drawer.
+    private var owesPromptFocus = false
     // WebKit ends a main-frame navigation with error 102 after converting it
     // into a WKDownload. Preserve the page's prior phase for that exact path.
     private var phaseBeforeProvisionalNavigation: BrowserPhase?
@@ -151,6 +155,8 @@ final class BrowserController: NSObject, ObservableObject {
             guard service.allowsPromptInjection(at: webView?.url) else {
                 return .failed("Not sent, the page isn't showing a chat")
             }
+            await beginKeyboardFocus()
+            defer { endKeyboardFocus() }
             let result = try await evaluate(adapter.fillScript(prompt: prompt), as: ScriptResult.self)
             guard result.ok else {
                 if result.reason == "composer-not-found" {
@@ -165,6 +171,34 @@ final class BrowserController: NSObject, ObservableObject {
         } catch {
             return .failed("Not sent, couldn't reach the page")
         }
+    }
+
+    /// Fill and Return both need the page to hold keyboard focus: while
+    /// another view has it, WebKit skips editing commands, so the fill would
+    /// fall back to setting text the provider may not register. Send to
+    /// Both's web views share a window, so they take turns.
+    private func beginKeyboardFocus() async {
+        guard !holdsKeyboardFocus else { return }
+        await KeyboardFocusLease.shared.acquire()
+        holdsKeyboardFocus = true
+        owesPromptFocus = reservesFocusForPrompt
+        (webView as? ProviderWebView)?.takeKeyboardFocus()
+    }
+
+    /// Ends this send's turn with keyboard focus. The last send to finish
+    /// gives focus back to the prompt drawer, unless the drawer has closed or
+    /// the page no longer holds focus, such as after the user clicked
+    /// somewhere else. Giving it back between turns would let the drawer
+    /// take focus from the next send in the middle of its fill.
+    private func endKeyboardFocus() {
+        guard holdsKeyboardFocus else { return }
+        holdsKeyboardFocus = false
+        let owedPromptFocus = owesPromptFocus
+        owesPromptFocus = false
+        let anotherSendIsWaiting = KeyboardFocusLease.shared.release()
+        guard owedPromptFocus, !anotherSendIsWaiting, reservesFocusForPrompt,
+              (webView as? ProviderWebView)?.hasKeyboardFocus == true else { return }
+        restorePromptFocus()
     }
 
     func openNewConversation() {
@@ -371,58 +405,77 @@ final class BrowserController: NSObject, ObservableObject {
         return nsError.domain == NSURLErrorDomain && nsError.code == NSURLErrorCancelled
     }
 
-    /// Once Send has been clicked, a failure can no longer claim "not sent".
-    private func cancelledOutcome(didClickSend: Bool) -> PromptDispatchOutcome {
-        didClickSend
+    /// Once Return has been pressed, a failure can no longer claim "not sent".
+    private func cancelledOutcome(didPressReturn: Bool) -> PromptDispatchOutcome {
+        didPressReturn
             ? .failed("Couldn't confirm it sent, the send was cancelled")
             : .failed("Not sent, the send was cancelled")
     }
 
-    /// How long a filled composer has to show an enabled Send button.
-    private static let sendButtonTimeout: TimeInterval = 4
-    /// How long the composer has to clear after Send is clicked.
+    /// How long a filled composer has to hold the prompt with focus.
+    private static let returnKeyTimeout: TimeInterval = 4
+    /// How long the provider has to confirm after Return is pressed.
     private static let submissionConfirmationTimeout: TimeInterval = 10
 
+    /// Sends with a real Return keypress, the way a user would, rather than
+    /// finding and clicking the provider's Send button. The composer clearing
+    /// confirms the send, and so does a new conversation's URL appearing.
+    /// Nothing here retries Return: a second press could send twice.
     private func waitForSubmission(prompt: String) async -> PromptDispatchOutcome {
-        var deadline = Date().addingTimeInterval(Self.sendButtonTimeout)
-        var didClickSend = false
+        var deadline = Date().addingTimeInterval(Self.returnKeyTimeout)
+        var didPressReturn = false
+        var urlBeforeReturn: URL?
+        var hasGivenPageTimeWithFocus = false
         while Date() < deadline {
-            if Task.isCancelled { return cancelledOutcome(didClickSend: didClickSend) }
+            if Task.isCancelled { return cancelledOutcome(didPressReturn: didPressReturn) }
             do {
                 guard service.allowsPromptInjection(at: webView?.url) else {
-                    return didClickSend
+                    return didPressReturn
                         ? .failed("Couldn't confirm it sent, the page changed")
                         : .failed("Not sent, the page changed first")
                 }
-                if didClickSend {
-                    if try await evaluate(
-                        adapter.submissionConfirmationScript(),
-                        as: Bool.self
-                    ) {
+                if didPressReturn {
+                    if adapter.startedConversation(from: urlBeforeReturn, to: webView?.url) {
+                        return .sent
+                    }
+                    if try await evaluate(adapter.submissionConfirmationScript(), as: Bool.self) {
                         return .sent
                     }
                 } else {
-                    let result = try await evaluate(adapter.submissionScript(prompt: prompt), as: ScriptResult.self)
-                    didClickSend = result.ok
-                    if didClickSend {
+                    let result = try await evaluate(adapter.returnKeyTargetScript(prompt: prompt), as: ScriptResult.self)
+                    if result.ok, let providerWebView = webView as? ProviderWebView {
+                        urlBeforeReturn = providerWebView.url
+                        providerWebView.pressReturnKey()
+                        didPressReturn = true
                         deadline = Date().addingTimeInterval(Self.submissionConfirmationTimeout)
                     }
                 }
             } catch {
-                return didClickSend
+                return didPressReturn
                     ? .failed("Couldn't confirm it sent, lost contact with the page")
                     : .failed("Typed but not sent, lost contact with the page")
             }
             do {
                 try await Task.sleep(for: .milliseconds(180))
             } catch {
-                return cancelledOutcome(didClickSend: didClickSend)
+                return cancelledOutcome(didPressReturn: didPressReturn)
+            }
+            // The send took keyboard focus for the page. Once the page has had
+            // a moment with Return, give it back to an open prompt drawer
+            // rather than holding it while the send confirms.
+            if didPressReturn, !hasGivenPageTimeWithFocus {
+                hasGivenPageTimeWithFocus = true
+                endKeyboardFocus()
             }
         }
         if await isLoginRequired() { return .loginRequired }
-        return didClickSend
-            ? .failed("Couldn't confirm it sent, check the chat")
-            : .failed("Typed but not sent, couldn't press send")
+        guard didPressReturn else {
+            return .failed("Typed but not sent, couldn't press Return")
+        }
+        if (try? await evaluate(adapter.composerHoldsPromptScript(prompt: prompt), as: Bool.self)) == true {
+            return .failed("Typed but not sent, Return didn't send it")
+        }
+        return .failed("Couldn't confirm it sent, check the chat")
     }
 
     private func evaluate<Value: Decodable & Sendable>(_ script: String, as type: Value.Type) async throws -> Value {
@@ -446,6 +499,34 @@ final class BrowserController: NSObject, ObservableObject {
         }
     }
 
+}
+
+/// Lets one send at a time hold keyboard focus for its web view.
+@MainActor
+final class KeyboardFocusLease {
+    static let shared = KeyboardFocusLease()
+    private var isHeld = false
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+
+    func acquire() async {
+        guard isHeld else {
+            isHeld = true
+            return
+        }
+        await withCheckedContinuation { waiters.append($0) }
+    }
+
+    /// Hands the lease to the next waiting send, if any, and reports whether
+    /// there was one.
+    @discardableResult
+    func release() -> Bool {
+        guard !waiters.isEmpty else {
+            isHeld = false
+            return false
+        }
+        waiters.removeFirst().resume()
+        return true
+    }
 }
 
 private enum BrowserError: Error {
@@ -927,11 +1008,58 @@ final class BrowserHostView: NSView {
     }
 }
 
-/// While the prompt drawer is open, pages may not move keyboard focus into themselves; only the user can.
+/// While the prompt drawer is open, pages may not move keyboard focus into themselves; only the user and Duet's own Return keypress can.
 final class ProviderWebView: WKWebView {
     var reservesFocusForPrompt: () -> Bool = { false }
     var onRefusedFocus: () -> Void = {}
     var onLeftSuperview: () -> Void = {}
+    private var isTakingFocusForKeyPress = false
+
+    /// Makes this view first responder in its window for Duet's own input,
+    /// even past an open prompt drawer. WebKit runs editing commands and the
+    /// default actions of key events only while the view is first responder
+    /// in its window. Only that window changes: neither the key window nor
+    /// the active app does. A view with no window needs nothing.
+    func takeKeyboardFocus() {
+        guard let window, !hasKeyboardFocus else { return }
+        isTakingFocusForKeyPress = true
+        window.makeFirstResponder(self)
+        isTakingFocusForKeyPress = false
+    }
+
+    var hasKeyboardFocus: Bool {
+        guard let firstResponder = window?.firstResponder as? NSView else { return false }
+        return firstResponder === self || firstResponder.isDescendant(of: self)
+    }
+
+    /// Presses Return in the page through AppKit, so the page gets a trusted
+    /// keyboard event, unlike a script-made `KeyboardEvent`, and handles it as
+    /// if the user typed it. The event goes to the page's focused element.
+    func pressReturnKey() {
+        takeKeyboardFocus()
+        for type in [NSEvent.EventType.keyDown, .keyUp] {
+            guard let event = NSEvent.keyEvent(
+                with: type,
+                location: .zero,
+                modifierFlags: [],
+                timestamp: ProcessInfo.processInfo.systemUptime,
+                windowNumber: window?.windowNumber ?? 0,
+                context: nil,
+                characters: "\r",
+                charactersIgnoringModifiers: "\r",
+                isARepeat: false,
+                keyCode: Self.returnKeyCode
+            ) else { continue }
+            if type == .keyDown {
+                keyDown(with: event)
+            } else {
+                keyUp(with: event)
+            }
+        }
+    }
+
+    /// `kVK_Return`.
+    private static let returnKeyCode: UInt16 = 36
 
     override func viewDidMoveToSuperview() {
         super.viewDidMoveToSuperview()
@@ -942,7 +1070,7 @@ final class ProviderWebView: WKWebView {
     }
 
     override func becomeFirstResponder() -> Bool {
-        guard !reservesFocusForPrompt() || isUserFocusEvent(NSApp.currentEvent) else {
+        guard isTakingFocusForKeyPress || !reservesFocusForPrompt() || isUserFocusEvent(NSApp.currentEvent) else {
             // AppKit has already taken focus from the prompt, so hand it back once this attempt ends.
             Task { @MainActor [onRefusedFocus] in onRefusedFocus() }
             return false

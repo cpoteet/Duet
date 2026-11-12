@@ -39,6 +39,11 @@ enum PrintingScript {
     /// framework action that never reaches `window.print()` in WKWebView. Let
     /// that action run, then mark the card around the button as the only
     /// printed region and request native printing.
+    ///
+    /// The lookups stay: a Print button that never calls `window.print()`
+    /// sends no event Duet can see, and only the page knows which card to
+    /// print. They match Print buttons by accessible label and the card by
+    /// its text markers, not provider markup.
     private static func printControlFallback(markers: [String]) -> String {
         """
         const regionMarkers = \(JavaScriptLiteral.array(markers.map { $0.lowercased() }));

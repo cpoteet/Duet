@@ -1,0 +1,29 @@
+<!doctype html>
+<html><body>
+<!-- Claude's loading stand-in: a textarea that swallows Return, replaced by
+     the real editor, which takes over its text. -->
+<textarea id="static-composer-input"></textarea>
+<script>
+window.staticReturnPresses = 0;
+window.editorReturnPresses = 0;
+const standIn = document.querySelector('#static-composer-input');
+standIn.addEventListener('keydown', event => {
+  if (event.key !== 'Enter') return;
+  event.preventDefault();
+  window.staticReturnPresses++;
+});
+setTimeout(() => {
+  const editor = document.createElement('div');
+  editor.contentEditable = 'true';
+  editor.setAttribute('role', 'textbox');
+  editor.textContent = standIn.value;
+  editor.addEventListener('keydown', event => {
+    if (event.key !== 'Enter' || event.shiftKey || !event.isTrusted) return;
+    event.preventDefault();
+    window.editorReturnPresses++;
+    editor.textContent = '';
+  });
+  standIn.replaceWith(editor);
+}, 800);
+</script>
+</body></html>

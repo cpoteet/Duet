@@ -14,6 +14,38 @@ struct CoreTests {
         expect(ChatService.claude.startURL.absoluteString == "https://claude.ai", "Claude start URL changed")
         expect(ChatService.chatGPT.newConversationURL.absoluteString == "https://www.chatgpt.com/", "ChatGPT new conversation URL changed")
         expect(ChatService.claude.newConversationURL.absoluteString == "https://claude.ai/new", "Claude new conversation URL changed")
+
+        let chatGPTAdapter = ProviderAdapter.adapter(for: .chatGPT)
+        let claudeAdapter = ProviderAdapter.adapter(for: .claude)
+        let url = { (string: String) in URL(string: string) }
+        expect(
+            chatGPTAdapter.startedConversation(from: ChatService.chatGPT.newConversationURL, to: url("https://chatgpt.com/c/abc123")),
+            "A ChatGPT new conversation moving to /c/<id> should confirm the send"
+        )
+        expect(
+            chatGPTAdapter.startedConversation(from: url("https://chatgpt.com/g/g-p-123/project"), to: url("https://chatgpt.com/g/g-p-123/c/abc")),
+            "A ChatGPT project conversation should confirm the send"
+        )
+        expect(
+            !chatGPTAdapter.startedConversation(from: url("https://chatgpt.com/c/abc"), to: url("https://chatgpt.com/c/abc")),
+            "An existing ChatGPT conversation must not confirm from its URL"
+        )
+        expect(
+            !chatGPTAdapter.startedConversation(from: url("https://chatgpt.com/"), to: url("https://chatgpt.com/c/")),
+            "A conversation path with no ID must not confirm"
+        )
+        expect(
+            claudeAdapter.startedConversation(from: ChatService.claude.newConversationURL, to: url("https://claude.ai/chat/4c1e")),
+            "A Claude new conversation moving to /chat/<id> should confirm the send"
+        )
+        expect(
+            !claudeAdapter.startedConversation(from: url("https://claude.ai/chat/4c1e"), to: url("https://claude.ai/chat/9f2a")),
+            "Moving between existing Claude conversations must not confirm"
+        )
+        expect(
+            !claudeAdapter.startedConversation(from: url("https://claude.ai/new"), to: url("https://claude.ai/c/4c1e")),
+            "Claude must use its own conversation path, not ChatGPT's"
+        )
         expect(BrowserPhase.loading.promptReadinessTimeout > 12, "A cold provider must have time to finish loading before prompt dispatch gives up")
         expect(BrowserPhase.unloaded.promptReadinessTimeout == BrowserPhase.loading.promptReadinessTimeout, "An unloaded provider needs the same cold-load wait")
         expect(BrowserPhase.ready.promptReadinessTimeout == 12, "A loaded page with no composer should fail promptly")
@@ -86,7 +118,7 @@ struct CoreTests {
             let adapter = ProviderAdapter.adapter(for: service)
             let readiness = adapter.readinessScript()
             let fill = adapter.fillScript(prompt: "A quote: \\\" and a newline\\nnext line")
-            let submit = adapter.submissionScript(prompt: "test")
+            let returnTarget = adapter.returnKeyTargetScript(prompt: "test")
             let confirmation = adapter.submissionConfirmationScript()
             let fileDropCompatibility = adapter.fileDropCompatibilityScript()
             expect(
@@ -101,9 +133,14 @@ struct CoreTests {
             expect(readiness.contains("getClientRects"), "\(service.title) readiness script accepts a hidden composer")
             expect(fill.contains("InputEvent"), "\(service.title) fill script does not notify the page")
             expect(fill.contains("composer-not-empty"), "\(service.title) fill script does not protect provider drafts")
-            expect(!fill.contains("sendButton.click()"), "\(service.title) fill script must not submit early")
-            expect(submit.contains("sendButton.click()"), "\(service.title) submission script does not execute")
-            expect(submit.contains("composer-missing-prompt"), "\(service.title) submission must check the composer before clicking")
+            expect(!fill.contains(".click()"), "\(service.title) fill script must not submit early")
+            expect(!returnTarget.contains(".click()"), "\(service.title) must send with Return, not by clicking Send")
+            expect(returnTarget.contains("composer-missing-prompt"), "\(service.title) must check the composer before Return")
+            expect(returnTarget.contains("document.activeElement"), "\(service.title) must focus the composer before Return")
+            expect(
+                adapter.composerHoldsPromptScript(prompt: "test").contains("composerSelectors"),
+                "\(service.title) must check whether Return left the prompt in the composer"
+            )
             expect(confirmation.contains("composerSelectors"), "\(service.title) confirmation must find the current composer")
             expect(confirmation.contains("getClientRects"), "\(service.title) confirmation must require a visible composer")
             if service == .claude {

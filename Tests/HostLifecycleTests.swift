@@ -1126,14 +1126,17 @@ struct HostLifecycleTests {
                     service: service,
                     failures: &failures
                 )
-                try await testComposerFixture(
-                    named: "send-no-op.html",
-                    service: service,
-                    expectsConfirmation: false,
-                    failures: &failures
-                )
             }
-            try await testDelayedSend(failures: &failures)
+            // Only ChatGPT treats a plain textarea as its composer.
+            try await testComposerFixture(
+                named: "send-no-op.html",
+                service: .chatGPT,
+                expectsConfirmation: false,
+                failures: &failures
+            )
+            try await testClaudeStaticComposer(failures: &failures)
+            try await testReturnKeyPastPromptDrawer(failures: &failures)
+            try await testSendToBothPastPromptDrawer(failures: &failures)
             try await testClaudeSubmissionTiming(failures: &failures)
             try await testRepeatedPromptConfirmation(failures: &failures)
             try await testExistingDraftProtection(failures: &failures)
@@ -1486,22 +1489,26 @@ struct HostLifecycleTests {
         let fill: ScriptResult = try await evaluate(adapter.fillScript(prompt: prompt), in: webView)
         expect(fill.ok, "\(name) composer was not filled", failures: &failures)
 
-        let beforeClick: Bool = try await evaluate(
+        let beforeReturn: Bool = try await evaluate(
             adapter.submissionConfirmationScript(),
             in: webView
         )
-        expect(!beforeClick, "\(name) reported submission before click", failures: &failures)
+        expect(!beforeReturn, "\(name) reported submission before Return", failures: &failures)
 
-        let submit: ScriptResult = try await evaluate(adapter.submissionScript(prompt: prompt), in: webView)
-        expect(submit.ok, "\(name) send control was not clicked", failures: &failures)
+        let target: ScriptResult = try await evaluate(adapter.returnKeyTargetScript(prompt: prompt), in: webView)
+        expect(target.ok, "\(name) composer wasn't ready for Return: \(target.reason ?? "")", failures: &failures)
+        webView.pressReturnKey()
 
-        let confirmed: Bool = try await evaluate(
-            adapter.submissionConfirmationScript(),
-            in: webView
-        )
+        let confirmed = try await waitForSubmissionConfirmation(adapter: adapter, in: webView)
         expect(
             confirmed == expectsConfirmation,
             "\(name) returned the wrong submission confirmation",
+            failures: &failures
+        )
+        let holdsPrompt: Bool = try await evaluate(adapter.composerHoldsPromptScript(prompt: prompt), in: webView)
+        expect(
+            holdsPrompt == !expectsConfirmation,
+            "\(name) must report a composer that Return didn't send",
             failures: &failures
         )
 
@@ -1548,30 +1555,191 @@ struct HostLifecycleTests {
         }
     }
 
+    /// With the prompt drawer holding keyboard focus, Duet's Return keypress
+    /// must still send, and must be the only thing allowed to move focus into
+    /// the page.
     @MainActor
-    private static func testDelayedSend(failures: inout [String]) async throws {
+    private static func testReturnKeyPastPromptDrawer(failures: inout [String]) async throws {
+        let window = NSWindow(
+            contentRect: .init(x: 0, y: 0, width: 800, height: 640),
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        let container = NSView(frame: window.contentView?.bounds ?? .zero)
+        window.contentView = container
+        let drawerField = NSTextField(frame: .init(x: 0, y: 600, width: 400, height: 24))
         let (webView, loader) = makeFixtureWebView()
+        container.addSubview(webView)
+        container.addSubview(drawerField)
         defer {
             webView.navigationDelegate = nil
             webView.stopLoading()
+            webView.removeFromSuperview()
         }
-        try await loader.load(fixtureURL("delayed-send.html"), in: webView)
+        try await loader.load(fixtureURL("contenteditable.html"), in: webView)
+
+        webView.reservesFocusForPrompt = { true }
+        window.makeFirstResponder(drawerField)
+        window.makeFirstResponder(webView)
+        expect(
+            window.firstResponder !== webView,
+            "The drawer test page must not take focus on its own",
+            failures: &failures
+        )
 
         let adapter = ProviderAdapter.adapter(for: .claude)
-        let prompt = "Delayed prompt"
-        _ = try await evaluate(adapter.fillScript(prompt: prompt), in: webView) as ScriptResult
-
-        let early: ScriptResult = try await evaluate(adapter.submissionScript(prompt: prompt), in: webView)
-        expect(!early.ok, "Delayed send control was available too early", failures: &failures)
-        try await Task.sleep(for: .milliseconds(350))
-
-        let submit: ScriptResult = try await evaluate(adapter.submissionScript(prompt: prompt), in: webView)
-        expect(submit.ok, "Delayed send control never became ready", failures: &failures)
-        let confirmed: Bool = try await evaluate(
-            adapter.submissionConfirmationScript(),
-            in: webView
+        let prompt = "Sent past the drawer"
+        let fill: ScriptResult = try await evaluate(adapter.fillScript(prompt: prompt), in: webView)
+        expect(fill.ok, "The drawer test composer was not filled", failures: &failures)
+        let target: ScriptResult = try await evaluate(adapter.returnKeyTargetScript(prompt: prompt), in: webView)
+        expect(target.ok, "The drawer test composer wasn't ready for Return", failures: &failures)
+        webView.pressReturnKey()
+        expect(
+            window.firstResponder === webView,
+            "Return must take focus for the page even while the drawer reserves it",
+            failures: &failures
         )
-        expect(confirmed, "Delayed submission was not confirmed", failures: &failures)
+        let confirmed = try await waitForSubmissionConfirmation(adapter: adapter, in: webView)
+        expect(confirmed, "Return must send while the prompt drawer holds focus", failures: &failures)
+
+        window.makeFirstResponder(drawerField)
+        window.makeFirstResponder(webView)
+        expect(
+            window.firstResponder !== webView,
+            "After Return, the page must again be kept from taking focus",
+            failures: &failures
+        )
+    }
+
+    /// Send to Both through the controllers, with the prompt drawer holding
+    /// focus in the same window: each fill must go through WebKit's own
+    /// editing (a trusted input event, not the fallback), each Return must
+    /// send, and focus must go back to the drawer once, after both.
+    @MainActor
+    private static func testSendToBothPastPromptDrawer(failures: inout [String]) async throws {
+        let fixtureHTML = try String(contentsOf: fixtureURL("contenteditable.html"), encoding: .utf8)
+        let window = NSWindow(
+            contentRect: .init(x: 0, y: 0, width: 1000, height: 640),
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        let container = NSView(frame: window.contentView?.bounds ?? .zero)
+        window.contentView = container
+        let drawerField = NSTextField(frame: .init(x: 0, y: 600, width: 400, height: 24))
+        container.addSubview(drawerField)
+
+        var restores = 0
+        var browsers: [BrowserController] = []
+        for (index, service) in ChatService.allCases.enumerated() {
+            let browser = BrowserController(service: service)
+            let webView = browser.prepare()
+            webView.frame = NSRect(x: CGFloat(index) * 500, y: 0, width: 500, height: 590)
+            container.addSubview(webView)
+            webView.configuration.userContentController.removeAllUserScripts()
+            browser.reservesFocusForPrompt = true
+            browser.restorePromptFocus = {
+                restores += 1
+                window.makeFirstResponder(drawerField)
+            }
+            webView.loadHTMLString(fixtureHTML, baseURL: service.startURL)
+            browsers.append(browser)
+        }
+        defer { browsers.forEach { $0.release() } }
+        let loadDeadline = Date().addingTimeInterval(5)
+        while browsers.contains(where: { $0.phase != .ready }), Date() < loadDeadline {
+            try await Task.sleep(for: .milliseconds(25))
+        }
+        guard browsers.allSatisfy({ $0.phase == .ready }) else {
+            failures.append("Send to Both drawer fixtures did not load")
+            return
+        }
+        for browser in browsers {
+            guard let webView = browser.webView else { continue }
+            _ = try await evaluate(
+                """
+                (() => {
+                  window.trustedInputs = 0;
+                  document.addEventListener('input', event => { if (event.isTrusted) window.trustedInputs++; }, true);
+                  return true;
+                })()
+                """,
+                in: webView
+            ) as Bool
+        }
+
+        for round in 1...2 {
+            restores = 0
+            window.makeFirstResponder(drawerField)
+            let prompt = "Send to Both round \(round)"
+            let firstBrowser = browsers[0]
+            let secondBrowser = browsers[1]
+            async let first = firstBrowser.dispatch(prompt: prompt)
+            async let second = secondBrowser.dispatch(prompt: prompt)
+            let outcomes = await [first, second]
+            expect(
+                outcomes == [.sent, .sent],
+                "Send to Both past the drawer, round \(round), returned \(outcomes)",
+                failures: &failures
+            )
+            for browser in browsers {
+                guard let webView = browser.webView else { continue }
+                let trustedInputs: Int = try await evaluate("window.trustedInputs", in: webView)
+                expect(
+                    trustedInputs == round,
+                    "\(browser.service.title) fill in round \(round) must use WebKit editing, saw \(trustedInputs) trusted inputs",
+                    failures: &failures
+                )
+            }
+            expect(restores == 1, "Round \(round) must give focus back to the drawer once, did \(restores) times", failures: &failures)
+            expect(window.firstResponder !== browsers[0].webView && window.firstResponder !== browsers[1].webView,
+                   "Round \(round) must leave focus with the drawer", failures: &failures)
+        }
+    }
+
+    /// A cold Claude load shows a stand-in textarea that swallows Return
+    /// before its real editor mounts. Duet must wait for the editor and
+    /// press Return there, once.
+    @MainActor
+    private static func testClaudeStaticComposer(failures: inout [String]) async throws {
+        let fixtureHTML = try String(contentsOf: fixtureURL("claude-static-composer.html"), encoding: .utf8)
+        let browser = BrowserController(service: .claude)
+        let webView = browser.prepare()
+        defer { browser.release() }
+        webView.configuration.userContentController.removeAllUserScripts()
+        webView.loadHTMLString(fixtureHTML, baseURL: ChatService.claude.startURL)
+        let loadDeadline = Date().addingTimeInterval(5)
+        while browser.phase != .ready, Date() < loadDeadline {
+            try await Task.sleep(for: .milliseconds(25))
+        }
+        guard browser.phase == .ready else {
+            failures.append("Claude static composer fixture did not load")
+            return
+        }
+        let outcome = await browser.dispatch(prompt: "Past the stand-in")
+        expect(outcome == .sent, "Claude's stand-in composer must not take the send, got \(outcome)", failures: &failures)
+        let staticPresses: Int = try await evaluate("window.staticReturnPresses", in: webView)
+        let editorPresses: Int = try await evaluate("window.editorReturnPresses", in: webView)
+        expect(staticPresses == 0, "Return must not go to Claude's stand-in composer", failures: &failures)
+        expect(editorPresses == 1, "Return must go to Claude's real editor once, got \(editorPresses)", failures: &failures)
+    }
+
+    /// Key events reach the page asynchronously, so poll for the composer to
+    /// clear. A page that never confirms comes back `false`.
+    @MainActor
+    private static func waitForSubmissionConfirmation(
+        adapter: ProviderAdapter,
+        in webView: WKWebView,
+        timeout: TimeInterval = 1
+    ) async throws -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        repeat {
+            let confirmed: Bool = try await evaluate(adapter.submissionConfirmationScript(), in: webView)
+            if confirmed { return true }
+            try await Task.sleep(for: .milliseconds(25))
+        } while Date() < deadline
+        return false
     }
 
     @MainActor
@@ -1583,9 +1751,11 @@ struct HostLifecycleTests {
                 with: "<script>\(fixtureScript)</script>"
             )
         for (configuration, expectedOutcome) in [
-            ("3000, 5500", PromptDispatchOutcome.sent),
-            ("0, null", .failed("Couldn't confirm it sent, check the chat")),
-            ("null, null", .failed("Typed but not sent, couldn't press send"))
+            ("'clear', 5500", PromptDispatchOutcome.sent),
+            ("'navigate', 300", .sent),
+            ("'replace', 0", .failed("Couldn't confirm it sent, check the chat")),
+            ("'ignore', 0", .failed("Typed but not sent, Return didn't send it")),
+            ("'newline', 0", .failed("Typed but not sent, Return didn't send it"))
         ] {
             let state = AppState(startupDestination: .claude)
             let browser = state.browser(for: .claude)
@@ -1610,10 +1780,10 @@ struct HostLifecycleTests {
                 "Claude timing fixture (\(configuration)) returned \(results)",
                 failures: &failures
             )
-            let clicks: Int = try await evaluate("window.sendClicks", in: webView)
+            let presses: Int = try await evaluate("window.returnPresses", in: webView)
             expect(
-                clicks == (configuration == "null, null" ? 0 : 1),
-                "Claude timing fixture must click Send only once after it becomes ready",
+                presses == 1,
+                "Claude timing fixture (\(configuration)) must get exactly one trusted Return, got \(presses)",
                 failures: &failures
             )
             expect(
@@ -1643,8 +1813,10 @@ struct HostLifecycleTests {
         _ = try await evaluate(
             """
             (() => {
-              window.sendClicks = 0;
-              document.querySelector('button').addEventListener('click', () => window.sendClicks++);
+              window.returnPresses = 0;
+              document.querySelector('textarea').addEventListener('keydown', event => {
+                if (event.key === 'Enter' && event.isTrusted) window.returnPresses++;
+              });
               return true;
             })()
             """,
@@ -1656,21 +1828,17 @@ struct HostLifecycleTests {
             in: webView
         ) as Bool
 
-        let refused: ScriptResult = try await evaluate(adapter.submissionScript(prompt: prompt), in: webView)
-        expect(!refused.ok, "A composer cleared before Duet's click must block submission", failures: &failures)
+        let refused: ScriptResult = try await evaluate(adapter.returnKeyTargetScript(prompt: prompt), in: webView)
+        expect(!refused.ok, "A composer cleared before Duet's Return must block submission", failures: &failures)
         expect(refused.reason == "composer-missing-prompt", "A cleared composer should report the missing prompt", failures: &failures)
-        let clicksBeforeFill: Int = try await evaluate("window.sendClicks", in: webView)
-        expect(clicksBeforeFill == 0, "A cleared composer must not click Send", failures: &failures)
 
         _ = try await evaluate(adapter.fillScript(prompt: prompt), in: webView) as ScriptResult
         _ = try await evaluate(
             "(() => { document.querySelector('textarea').value += ' edited'; return true; })()",
             in: webView
         ) as Bool
-        let editedSubmission: ScriptResult = try await evaluate(adapter.submissionScript(prompt: prompt), in: webView)
+        let editedSubmission: ScriptResult = try await evaluate(adapter.returnKeyTargetScript(prompt: prompt), in: webView)
         expect(!editedSubmission.ok, "An edited composer must not submit a changed prompt", failures: &failures)
-        let clicksAfterEdit: Int = try await evaluate("window.sendClicks", in: webView)
-        expect(clicksAfterEdit == 0, "An edited composer must not click Send", failures: &failures)
         _ = try await evaluate(
             "(() => { document.querySelector('textarea').value = 'Different draft'; return true; })()",
             in: webView
@@ -1686,16 +1854,14 @@ struct HostLifecycleTests {
             adapter.submissionConfirmationScript(),
             in: webView
         )
-        expect(!beforeClick, "Refilling a repeated prompt must not confirm before the click", failures: &failures)
-        let submit: ScriptResult = try await evaluate(adapter.submissionScript(prompt: prompt), in: webView)
-        expect(submit.ok, "Repeated prompt send control was not clicked", failures: &failures)
-        let confirmed: Bool = try await evaluate(
-            adapter.submissionConfirmationScript(),
-            in: webView
-        )
-        expect(confirmed, "A filled and clicked repeated prompt should confirm submission", failures: &failures)
-        let clicksAfterFill: Int = try await evaluate("window.sendClicks", in: webView)
-        expect(clicksAfterFill == 1, "A filled prompt should click Send once", failures: &failures)
+        expect(!beforeClick, "Refilling a repeated prompt must not confirm before Return", failures: &failures)
+        let submit: ScriptResult = try await evaluate(adapter.returnKeyTargetScript(prompt: prompt), in: webView)
+        expect(submit.ok, "Repeated prompt composer wasn't ready for Return", failures: &failures)
+        webView.pressReturnKey()
+        let confirmed = try await waitForSubmissionConfirmation(adapter: adapter, in: webView)
+        expect(confirmed, "A filled repeated prompt should confirm after Return", failures: &failures)
+        let presses: Int = try await evaluate("window.returnPresses", in: webView)
+        expect(presses == 1, "A filled prompt should get one Return", failures: &failures)
     }
 
     @MainActor
@@ -2351,8 +2517,8 @@ struct HostLifecycleTests {
     }
 
     @MainActor
-    private static func makeFixtureWebView() -> (WKWebView, FixtureLoader) {
-        let webView = WKWebView(
+    private static func makeFixtureWebView() -> (ProviderWebView, FixtureLoader) {
+        let webView = ProviderWebView(
             frame: NSRect(x: 0, y: 0, width: 800, height: 600),
             configuration: WKWebViewConfiguration()
         )

@@ -299,7 +299,14 @@ struct ContentView: View {
     private var browserAreaWithToast: some View {
         ZStack(alignment: .bottom) {
             browserArea
-            if let toast {
+            // A Quick Prompt send runs with the drawer closed, so its status
+            // shows here until the result replaces it.
+            if isShowingDispatchProgress {
+                dispatchProgressToast
+                    .padding(.horizontal, 20)
+                    .padding(.bottom, 20)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+            } else if let toast {
                 dispatchToast(toast)
                     .padding(.horizontal, 20)
                     .padding(.bottom, 20)
@@ -307,6 +314,26 @@ struct ContentView: View {
             }
         }
         .animation(.easeOut(duration: 0.2), value: toast)
+        .animation(.easeOut(duration: 0.2), value: isShowingDispatchProgress)
+    }
+
+    private var isShowingDispatchProgress: Bool {
+        !appState.isPromptDrawerOpen && !appState.activeDispatchServices.isEmpty
+    }
+
+    private var dispatchProgressToast: some View {
+        HStack(spacing: 10) {
+            ProgressView()
+                .controlSize(.small)
+            Text(appState.dispatchProgressMessage)
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(palette.primaryText)
+                .lineLimit(1)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .toastCapsule(palette: palette, colorScheme: colorScheme)
+        .accessibilityElement(children: .combine)
     }
 
     private func servicePane(_ service: ChatService) -> some View {
@@ -388,7 +415,7 @@ struct ContentView: View {
                 if isPreparingPromptDispatch || !appState.activeDispatchServices.isEmpty {
                     ProgressView()
                         .controlSize(.small)
-                    Text("Sending…")
+                    Text(appState.dispatchProgressMessage)
                         .font(.caption)
                         .foregroundStyle(palette.secondaryText)
                 }
@@ -475,12 +502,7 @@ struct ContentView: View {
         .padding(.leading, 14)
         .padding(.trailing, 6)
         .padding(.vertical, 8)
-        .background(palette.drawer, in: Capsule(style: .continuous))
-        .overlay {
-            Capsule(style: .continuous)
-                .stroke(palette.fieldBorder, lineWidth: 1)
-        }
-        .shadow(color: .black.opacity(colorScheme == .dark ? 0.28 : 0.16), radius: 12, y: 5)
+        .toastCapsule(palette: palette, colorScheme: colorScheme)
         .accessibilityElement(children: .contain)
     }
 
@@ -729,6 +751,18 @@ private struct AppPalette {
     var success: Color { Color(red: 0.20, green: 0.64, blue: 0.42) }
     var warning: Color { Color(red: 0.92, green: 0.49, blue: 0.23) }
     var accent: Color { Color(red: 0.34, green: 0.40, blue: 0.82) }
+}
+
+private extension View {
+    /// The floating capsule behind the workspace's send status and results.
+    func toastCapsule(palette: AppPalette, colorScheme: ColorScheme) -> some View {
+        background(palette.drawer, in: Capsule(style: .continuous))
+            .overlay {
+                Capsule(style: .continuous)
+                    .stroke(palette.fieldBorder, lineWidth: 1)
+            }
+            .shadow(color: .black.opacity(colorScheme == .dark ? 0.28 : 0.16), radius: 12, y: 5)
+    }
 }
 
 private struct ProviderMark: View {

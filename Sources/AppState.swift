@@ -24,6 +24,8 @@ final class AppState: ObservableObject {
         didSet { promptRevision &+= 1 }
     }
     @Published private(set) var activeDispatchServices: Set<ChatService> = []
+    /// Providers whose send is waiting for the page's message box to load.
+    @Published private(set) var servicesWaitingForComposer: Set<ChatService> = []
     @Published private(set) var resettingServices: Set<ChatService> = []
     @Published private(set) var dispatchNotice: DispatchNotice?
     @Published private(set) var updateAvailable: UpdateInfo?
@@ -253,19 +255,14 @@ final class AppState: ObservableObject {
         activeDispatchServices.formUnion(services)
         defer {
             activeDispatchServices.subtract(services)
+            servicesWaitingForComposer.subtract(services)
             releaseInactiveBrowsersIfNeeded()
         }
 
         let outcomes: [PromptDispatchResult]
         if case .both = target {
-            async let chatGPT = browser(for: .chatGPT).dispatch(
-                prompt: text,
-                startsNewConversation: startingNewConversations
-            )
-            async let claude = browser(for: .claude).dispatch(
-                prompt: text,
-                startsNewConversation: startingNewConversations
-            )
+            async let chatGPT = dispatch(text, to: .chatGPT, startingNewConversation: startingNewConversations)
+            async let claude = dispatch(text, to: .claude, startingNewConversation: startingNewConversations)
             outcomes = [
                 PromptDispatchResult(service: .chatGPT, outcome: await chatGPT),
                 PromptDispatchResult(service: .claude, outcome: await claude)
@@ -275,16 +272,36 @@ final class AppState: ObservableObject {
             outcomes = [
                 PromptDispatchResult(
                     service: service,
-                    outcome: await browser(for: service).dispatch(
-                        prompt: text,
-                        startsNewConversation: startingNewConversations
-                    )
+                    outcome: await dispatch(text, to: service, startingNewConversation: startingNewConversations)
                 )
             ]
         }
 
         dispatchNotice = DispatchNotice(results: outcomes)
         return outcomes
+    }
+
+    private func dispatch(
+        _ text: String,
+        to service: ChatService,
+        startingNewConversation: Bool
+    ) async -> PromptDispatchOutcome {
+        await browser(for: service).dispatch(
+            prompt: text,
+            startsNewConversation: startingNewConversation,
+            waitingForComposerChanged: { [weak self] isWaiting in
+                if isWaiting {
+                    self?.servicesWaitingForComposer.insert(service)
+                } else {
+                    self?.servicesWaitingForComposer.remove(service)
+                }
+            }
+        )
+    }
+
+    /// The status a prompt surface shows while a send is under way.
+    var dispatchProgressMessage: String {
+        DispatchProgress.message(waitingFor: servicesWaitingForComposer)
     }
 
     func clearWebsiteData(for service: ChatService) async {

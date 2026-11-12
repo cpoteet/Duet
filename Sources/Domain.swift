@@ -272,6 +272,18 @@ struct PromptDispatchResult: Equatable {
     var wasSent: Bool { outcome.wasSent }
 }
 
+/// The status Duet shows while a send is under way.
+enum DispatchProgress {
+    /// Names each provider whose page is still loading its message box, which
+    /// a cold Claude load can take about 20 seconds to do. Once none is,
+    /// the send itself is under way.
+    static func message(waitingFor services: Set<ChatService>) -> String {
+        let waiting = ChatService.allCases.filter(services.contains).map(\.title)
+        guard !waiting.isEmpty else { return "Sending…" }
+        return "Waiting for \(waiting.joined(separator: " and ")) to load…"
+    }
+}
+
 struct DispatchNotice: Identifiable, Equatable {
     let id = UUID()
     let results: [PromptDispatchResult]

@@ -23,6 +23,9 @@ final class BrowserController: NSObject, ObservableObject {
     private lazy var locationBridge = LocationBridge(service: service)
     private lazy var printingBridge = PrintingBridge(service: service, presenter: self)
     private var hasRetriedBlankInitialLoad = false
+    /// When the main frame last finished loading, which starts the
+    /// provider's startup time.
+    private var mainFrameFinishedAt = Date.distantPast
     /// Set when the latest main-frame response was a bot-check challenge.
     private var mainFrameResponseIsChallenge = false
     /// Set while a send holds the keyboard focus lease.
@@ -134,9 +137,14 @@ final class BrowserController: NSObject, ObservableObject {
         NSWorkspace.shared.open(service.startURL)
     }
 
+    /// Sends `prompt` to the provider page. `waitingForComposerChanged`
+    /// hears `true` once the send has to wait for the page's message box to
+    /// load, and `false` when that wait ends, however it ends. A page that is
+    /// already showing its message box never reports a wait.
     func dispatch(
         prompt: String,
-        startsNewConversation: Bool = false
+        startsNewConversation: Bool = false,
+        waitingForComposerChanged: @MainActor (Bool) -> Void = { _ in }
     ) async -> PromptDispatchOutcome {
         // A new conversation is a fresh page load, so give it the cold-load wait.
         let readinessTimeout = startsNewConversation ? BrowserPhase.loading.promptReadinessTimeout : phase.promptReadinessTimeout
@@ -145,7 +153,7 @@ final class BrowserController: NSObject, ObservableObject {
         } else {
             _ = acquire()
         }
-        switch await waitForComposer(timeout: readinessTimeout) {
+        switch await waitForComposer(timeout: readinessTimeout, waitingChanged: waitingForComposerChanged) {
         case .ready:
             break
         case .loginRequired:
@@ -227,15 +235,27 @@ final class BrowserController: NSObject, ObservableObject {
         _ = prepare()
     }
 
-    private func waitForComposer(timeout: TimeInterval) async -> ComposerReadiness {
+    private func waitForComposer(
+        timeout: TimeInterval,
+        waitingChanged: @MainActor (Bool) -> Void
+    ) async -> ComposerReadiness {
         let deadline = Date().addingTimeInterval(timeout)
         var nextLoginCheck = Date.distantPast
+        var isWaiting = false
+        defer { if isWaiting { waitingChanged(false) } }
         while Date() < deadline {
             if Task.isCancelled { return .unavailable }
             if case .failed = phase { return .unavailable }
             if phase == .verificationRequired { return .unavailable }
-            if await hasComposer() { return .ready }
-            if Date() >= nextLoginCheck {
+            let showsComposer = await hasComposer()
+            if showsComposer, hasFinishedStartup { return .ready }
+            if !isWaiting {
+                isWaiting = true
+                waitingChanged(true)
+            }
+            // A usable composer wins over sign-in links on the same page,
+            // such as ChatGPT's guest page, even during the startup wait.
+            if !showsComposer, Date() >= nextLoginCheck {
                 if await isLoginRequired() { return .loginRequired }
                 nextLoginCheck = Date().addingTimeInterval(0.9)
             }
@@ -252,6 +272,12 @@ final class BrowserController: NSObject, ObservableObject {
         guard phase == .unloaded else { return }
         beginProgrammaticNavigation()
         webView.load(URLRequest(url: service.startURL))
+    }
+
+    /// Whether the page has had its provider's startup time since its main
+    /// frame last finished loading (`ProviderAdapter.startupSettleTime`).
+    private var hasFinishedStartup: Bool {
+        Date().timeIntervalSince(mainFrameFinishedAt) >= adapter.startupSettleTime
     }
 
     private func hasComposer() async -> Bool {
@@ -351,6 +377,7 @@ final class BrowserController: NSObject, ObservableObject {
     /// verification state right away. Otherwise the page check still runs
     /// as a fallback, from `didFinish`.
     func finishNavigation() {
+        mainFrameFinishedAt = Date()
         clearNavigationPhaseTracking()
         phase = mainFrameResponseIsChallenge ? .verificationRequired : .ready
     }

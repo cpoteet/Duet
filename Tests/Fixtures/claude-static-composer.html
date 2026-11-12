@@ -6,6 +6,9 @@
 <script>
 window.staticReturnPresses = 0;
 window.editorReturnPresses = 0;
+window.loadedAt = null;
+window.editorReturnAt = null;
+window.addEventListener('load', () => { window.loadedAt = performance.now(); });
 const standIn = document.querySelector('#static-composer-input');
 standIn.addEventListener('keydown', event => {
   if (event.key !== 'Enter') return;
@@ -21,6 +24,7 @@ setTimeout(() => {
     if (event.key !== 'Enter' || event.shiftKey || !event.isTrusted) return;
     event.preventDefault();
     window.editorReturnPresses++;
+    window.editorReturnAt = performance.now();
     editor.textContent = '';
   });
   standIn.replaceWith(editor);

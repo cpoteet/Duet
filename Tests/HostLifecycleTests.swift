@@ -1171,6 +1171,7 @@ struct HostLifecycleTests {
             )
             try await testStandInComposer(named: "claude-static-composer.html", service: .claude, failures: &failures)
             try await testStandInComposer(named: "chatgpt-pending-composer.html", service: .chatGPT, failures: &failures)
+            try await testComposerBesideLoginDuringStartup(failures: &failures)
             try await testReturnKeyPastPromptDrawer(failures: &failures)
             try await testSendToBothPastPromptDrawer(failures: &failures)
             try await testClaudeSubmissionTiming(failures: &failures)
@@ -1713,6 +1714,7 @@ struct HostLifecycleTests {
                   const composer = document.createElement('div');
                   composer.id = 'prompt-textarea';
                   composer.contentEditable = 'true';
+                  composer.setAttribute('role', 'textbox');
                   composer.textContent = 'Ask anything';
                   composer.setAttribute('aria-hidden', 'true');
                   document.body.appendChild(composer);
@@ -1731,6 +1733,10 @@ struct HostLifecycleTests {
                 "(() => { document.querySelector('#prompt-textarea').removeAttribute('aria-hidden'); return true; })()",
                 in: webView
             ) as Bool
+            // Without this, the check below passes when the adapter finds no
+            // composer at all.
+            let findsReplacement: Bool = try await evaluate(adapter.readinessScript(), in: webView)
+            expect(findsReplacement, "The visible replacement composer must be found", failures: &failures)
             let replacementComposer: Bool = try await evaluate(
                 adapter.submissionConfirmationScript(),
                 in: webView
@@ -1839,6 +1845,10 @@ struct HostLifecycleTests {
             failures.append("Send to Both drawer fixtures did not load")
             return
         }
+        // These pages stand for ones already open, so let ChatGPT's startup
+        // time after load pass first.
+        let startupTime = ChatService.allCases.map { ProviderAdapter.adapter(for: $0).startupSettleTime }.max() ?? 0
+        try await Task.sleep(for: .seconds(startupTime + 0.1))
         for browser in browsers {
             guard let webView = browser.webView else { continue }
             _ = try await evaluate(
@@ -1859,12 +1869,18 @@ struct HostLifecycleTests {
             let prompt = "Send to Both round \(round)"
             let firstBrowser = browsers[0]
             let secondBrowser = browsers[1]
-            async let first = firstBrowser.dispatch(prompt: prompt)
-            async let second = secondBrowser.dispatch(prompt: prompt)
+            let waitReports = WaitReportCounter()
+            async let first = firstBrowser.dispatch(prompt: prompt, waitingForComposerChanged: { _ in waitReports.count += 1 })
+            async let second = secondBrowser.dispatch(prompt: prompt, waitingForComposerChanged: { _ in waitReports.count += 1 })
             let outcomes = await [first, second]
             expect(
                 outcomes == [.sent, .sent],
                 "Send to Both past the drawer, round \(round), returned \(outcomes)",
+                failures: &failures
+            )
+            expect(
+                waitReports.count == 0,
+                "Pages already showing a message box must not report a wait, round \(round) reported \(waitReports.count)",
                 failures: &failures
             )
             for browser in browsers {
@@ -1893,7 +1909,8 @@ struct HostLifecycleTests {
         failures: inout [String]
     ) async throws {
         let fixtureHTML = try String(contentsOf: fixtureURL(name), encoding: .utf8)
-        let browser = BrowserController(service: service)
+        let state = AppState(startupDestination: service == .claude ? .claude : .chatGPT)
+        let browser = state.browser(for: service)
         let webView = browser.prepare()
         defer { browser.release() }
         webView.configuration.userContentController.removeAllUserScripts()
@@ -1906,12 +1923,98 @@ struct HostLifecycleTests {
             failures.append("\(service.title) stand-in composer fixture did not load")
             return
         }
-        let outcome = await browser.dispatch(prompt: "Past the stand-in")
-        expect(outcome == .sent, "\(service.title)'s stand-in composer must not take the send, got \(outcome)", failures: &failures)
+        // The real editor mounts 800 ms in, so the send has to wait for it,
+        // and the status must say so while it does.
+        let send = Task { await state.send(prompt: "Past the stand-in", to: .service(service)) }
+        var waitingMessage: String?
+        let waitDeadline = Date().addingTimeInterval(6)
+        while waitingMessage == nil, Date() < waitDeadline {
+            if state.servicesWaitingForComposer == [service] {
+                waitingMessage = state.dispatchProgressMessage
+            }
+            try await Task.sleep(for: .milliseconds(25))
+        }
+        // Once the editor mounts, the send itself is still running, and the
+        // status must already be back to the normal one.
+        var sendingMessageWhileActive: String?
+        while sendingMessageWhileActive == nil, !state.activeDispatchServices.isEmpty, Date() < waitDeadline {
+            if state.servicesWaitingForComposer.isEmpty {
+                sendingMessageWhileActive = state.dispatchProgressMessage
+            }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        let results = await send.value
+        expect(
+            sendingMessageWhileActive == "Sending…",
+            "\(service.title)'s status must return to Sending once its editor mounts, got \(sendingMessageWhileActive ?? "nothing")",
+            failures: &failures
+        )
+        let outcome = results.first?.outcome
+        expect(
+            waitingMessage == "Waiting for \(service.title) to load…",
+            "A send waiting for \(service.title)'s editor must say so, got \(waitingMessage ?? "nothing")",
+            failures: &failures
+        )
+        expect(
+            state.servicesWaitingForComposer.isEmpty && state.dispatchProgressMessage == "Sending…",
+            "The waiting status must clear once \(service.title)'s send ends",
+            failures: &failures
+        )
+        expect(outcome == .sent, "\(service.title)'s stand-in composer must not take the send, got \(String(describing: outcome))", failures: &failures)
+        // Return must wait out the provider's startup after its page loads,
+        // however early its editor appears.
+        let returnDelay: Double = try await evaluate("(window.editorReturnAt - window.loadedAt) / 1000", in: webView)
+        let settle = ProviderAdapter.adapter(for: service).startupSettleTime
+        if settle > 0 {
+            expect(
+                returnDelay >= settle - 0.05,
+                "Return must wait \(settle)s after \(service.title)'s page loads, came after \(returnDelay)s",
+                failures: &failures
+            )
+        } else {
+            expect(returnDelay < 1.5, "\(service.title) has no startup hold, but Return came after \(returnDelay)s", failures: &failures)
+        }
         let staticPresses: Int = try await evaluate("window.staticReturnPresses", in: webView)
         let editorPresses: Int = try await evaluate("window.editorReturnPresses", in: webView)
         expect(staticPresses == 0, "Return must not go to \(service.title)'s stand-in composer", failures: &failures)
         expect(editorPresses == 1, "Return must go to \(service.title)'s real editor once, got \(editorPresses)", failures: &failures)
+    }
+
+    /// A page that shows a usable composer next to a "Log in" button, such as
+    /// ChatGPT's guest page, must still send. The composer wins even while
+    /// the send waits out ChatGPT's startup time after the page loads.
+    @MainActor
+    private static func testComposerBesideLoginDuringStartup(failures: inout [String]) async throws {
+        let fixtureHTML = """
+        <!doctype html>
+        <html><body>
+        <button>Log in</button>
+        <div contenteditable="true" role="textbox"></div>
+        <script>
+        const editor = document.querySelector('[role="textbox"]');
+        editor.addEventListener('keydown', event => {
+          if (event.key !== 'Enter' || event.shiftKey || !event.isTrusted) return;
+          event.preventDefault();
+          editor.textContent = '';
+        });
+        </script>
+        </body></html>
+        """
+        let browser = BrowserController(service: .chatGPT)
+        let webView = browser.prepare()
+        defer { browser.release() }
+        webView.configuration.userContentController.removeAllUserScripts()
+        webView.loadHTMLString(fixtureHTML, baseURL: ChatService.chatGPT.startURL)
+        let loadDeadline = Date().addingTimeInterval(5)
+        while browser.phase != .ready, Date() < loadDeadline {
+            try await Task.sleep(for: .milliseconds(25))
+        }
+        guard browser.phase == .ready else {
+            failures.append("Composer-beside-login fixture did not load")
+            return
+        }
+        let outcome = await browser.dispatch(prompt: "Guest page send")
+        expect(outcome == .sent, "A usable composer beside a Log in button must still send, got \(outcome)", failures: &failures)
     }
 
     /// Key events reach the page asynchronously, so poll for the composer to
@@ -2747,4 +2850,10 @@ struct HostLifecycleTests {
     ) {
         if !condition() { failures.append(message) }
     }
+}
+
+/// Counts a send's waiting reports from the main actor.
+@MainActor
+private final class WaitReportCounter {
+    var count = 0
 }

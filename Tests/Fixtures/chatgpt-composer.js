@@ -9,5 +9,6 @@ document.addEventListener('keydown', event => {
   const replacement = document.createElement('div');
   replacement.id = 'prompt-textarea';
   replacement.contentEditable = 'true';
+  replacement.setAttribute('role', 'textbox');
   composer.replaceWith(replacement);
 });

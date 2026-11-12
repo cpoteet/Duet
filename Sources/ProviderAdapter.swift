@@ -36,6 +36,9 @@ struct ProviderAdapter {
     /// The provider's first embedded load can finish with an empty document,
     /// so one automatic reload is allowed.
     let retriesBlankInitialLoad: Bool
+    /// How long after its page finishes loading the provider keeps setting
+    /// itself up. A Return pressed sooner can be dropped or rejected.
+    let startupSettleTime: TimeInterval
 
     static func adapter(for service: ChatService) -> ProviderAdapter {
         switch service {
@@ -47,12 +50,7 @@ struct ProviderAdapter {
                 // before the real contenteditable editor mounts in the
                 // composer's form. Waiting for the editor keeps Duet from
                 // filling and pressing Return into the stand-in.
-                // `#prompt-textarea` covers the editor's older markup, but
-                // only as a contenteditable, never as a textarea.
-                composerSelectors: [
-                    "[contenteditable='true'][role='textbox']",
-                    "#prompt-textarea[contenteditable='true']"
-                ],
+                composerSelectors: ["[contenteditable='true'][role='textbox']"],
                 // Conversations live at /c/<id>, including inside a GPT or
                 // project (/g/<id>/c/<id>).
                 conversationPathComponent: "c",
@@ -64,7 +62,15 @@ struct ProviderAdapter {
                 fileDropInputSelector: nil,
                 printableRegionMarkers: nil,
                 detectsVerificationChallenge: false,
-                retriesBlankInitialLoad: false
+                retriesBlankInitialLoad: false,
+                // A fresh page's own startup requests (conversation setup
+                // and its bot-check token) finish 0.7 to 1.6 s after load.
+                // Its editor appears about 0.5 s after load, and a Return
+                // pressed before setup ends was dropped, or rejected with
+                // "Your account changed". People can't type that fast, so
+                // ChatGPT never had to handle it. Nothing native reports when
+                // a page's own setup ends, so wait a fixed time after load.
+                startupSettleTime: 2.5
             )
         case .claude:
             ProviderAdapter(
@@ -89,7 +95,8 @@ struct ProviderAdapter {
                 fileDropInputSelector: "input[type='file'][data-testid='file-upload']",
                 printableRegionMarkers: ["ingredients", "steps"],
                 detectsVerificationChallenge: true,
-                retriesBlankInitialLoad: true
+                retriesBlankInitialLoad: true,
+                startupSettleTime: 0
             )
         }
     }
@@ -209,7 +216,8 @@ struct ProviderAdapter {
         """
 
     /// Page-side helpers that find the first visible composer and read its
-    /// text, whether it is a form control or a contenteditable editor.
+    /// text. Every adapter's composer is a contenteditable editor: the
+    /// textareas providers show are loading stand-ins Duet must skip.
     private var composerHelpers: String {
         """
         \(Self.visibilityHelper)
@@ -217,9 +225,7 @@ struct ProviderAdapter {
                   const findComposer = () => composerSelectors
                     .flatMap(selector => Array.from(document.querySelectorAll(selector)))
                     .find(isVisible);
-                  const composerText = composer => composer instanceof HTMLTextAreaElement || composer instanceof HTMLInputElement
-                    ? composer.value
-                    : composer.innerText || composer.textContent || '';
+                  const composerText = composer => composer.innerText || composer.textContent || '';
         """
     }
 
@@ -270,22 +276,13 @@ struct ProviderAdapter {
           if (composerText(composer).trim().length > 0) return { ok: false, reason: 'composer-not-empty' };
 
           composer.focus();
-          if (composer instanceof HTMLTextAreaElement || composer instanceof HTMLInputElement) {
-            // Use the native setter so framework-controlled fields see the
-            // change, then report it the way typing would.
-            const prototype = composer instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
-            Object.getOwnPropertyDescriptor(prototype, 'value').set.call(composer, prompt);
+          // insertText goes through the editor's own input handling and
+          // fires its input events. Only the fallback needs one sent by hand.
+          document.execCommand('selectAll', false, null);
+          const inserted = document.execCommand('insertText', false, prompt);
+          if (!inserted || (composer.innerText || '').trim() !== prompt.trim()) {
+            composer.textContent = prompt;
             composer.dispatchEvent(new InputEvent('input', { bubbles: true, composed: true, inputType: 'insertText', data: prompt }));
-            composer.dispatchEvent(new Event('change', { bubbles: true }));
-          } else {
-            // insertText goes through the editor's own input handling and
-            // fires its input events. Only the fallback needs one sent by hand.
-            document.execCommand('selectAll', false, null);
-            const inserted = document.execCommand('insertText', false, prompt);
-            if (!inserted || (composer.innerText || '').trim() !== prompt.trim()) {
-              composer.textContent = prompt;
-              composer.dispatchEvent(new InputEvent('input', { bubbles: true, composed: true, inputType: 'insertText', data: prompt }));
-            }
           }
           return { ok: true };
         })()

@@ -95,6 +95,15 @@ struct CoreTests {
         expect(!ChatService.claude.ownsWebsiteDataRecord(named: "notclaude.ai"), "Claude reset must not remove a lookalike domain")
         expect(!ChatService.claude.ownsWebsiteDataRecord(named: "chatgpt.com"), "Claude reset must not remove ChatGPT records")
         expect(!ChatService.chatGPT.ownsWebsiteDataRecord(named: "claude.ai"), "ChatGPT reset must not remove Claude records")
+        expect(DispatchProgress.message(waitingFor: []) == "Sending…", "A send with every page loaded shows Sending")
+        expect(
+            DispatchProgress.message(waitingFor: [.claude]) == "Waiting for Claude to load…",
+            "A send waiting on one page names that provider"
+        )
+        expect(
+            DispatchProgress.message(waitingFor: [.claude, .chatGPT]) == "Waiting for ChatGPT and Claude to load…",
+            "A send waiting on both pages names both, in a fixed order"
+        )
         expect(PromptDispatchOutcome.sent.wasSent, "Sent outcome must be marked sent")
         expect(!PromptDispatchOutcome.unavailable.wasSent, "Unavailable outcome must not be marked sent")
         expect(PromptDispatchOutcome.loginRequired.label == "Not sent, sign in first", "Login state must map correctly")
@@ -144,6 +153,12 @@ struct CoreTests {
             "A non-HTTP response is never a challenge"
         )
 
+        expect(
+            ProviderAdapter.adapter(for: .chatGPT).startupSettleTime >= 2,
+            "ChatGPT must finish its own startup before Duet presses Return"
+        )
+        expect(ProviderAdapter.adapter(for: .claude).startupSettleTime == 0, "Claude needs no startup hold")
+
         for service in ChatService.allCases {
             let adapter = ProviderAdapter.adapter(for: service)
             let readiness = adapter.readinessScript()
@@ -159,6 +174,12 @@ struct CoreTests {
                 (adapter.blankPageScript() != nil) == (service == .claude),
                 "Only Claude should retry a blank initial load"
             )
+            expect(
+                !adapter.composerSelectors.isEmpty
+                    && adapter.composerSelectors.allSatisfy { $0.contains("[contenteditable='true']") },
+                "\(service.title) must match only its contenteditable editor, never a loading stand-in textarea"
+            )
+            expect(!fill.contains("HTMLTextAreaElement"), "\(service.title) fill script must not keep textarea code")
             expect(readiness.contains("document.querySelector"), "\(service.title) readiness script has no selector")
             expect(readiness.contains("getClientRects"), "\(service.title) readiness script accepts a hidden composer")
             expect(fill.contains("InputEvent"), "\(service.title) fill script does not notify the page")

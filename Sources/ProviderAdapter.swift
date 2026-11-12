@@ -42,11 +42,16 @@ struct ProviderAdapter {
         case .chatGPT:
             ProviderAdapter(
                 pageHosts: service.providerPageHosts,
+                // No textarea: a cold load first shows a stand-in textarea
+                // (#pending-home-input, outside any form) for about a second
+                // before the real contenteditable editor mounts in the
+                // composer's form. Waiting for the editor keeps Duet from
+                // filling and pressing Return into the stand-in.
+                // `#prompt-textarea` covers the editor's older markup, but
+                // only as a contenteditable, never as a textarea.
                 composerSelectors: [
-                    "#prompt-textarea",
-                    "textarea[data-id='root']",
-                    "textarea",
-                    "[contenteditable='true'][role='textbox']"
+                    "[contenteditable='true'][role='textbox']",
+                    "#prompt-textarea[contenteditable='true']"
                 ],
                 // Conversations live at /c/<id>, including inside a GPT or
                 // project (/g/<id>/c/<id>).
@@ -147,13 +152,24 @@ struct ProviderAdapter {
         """
     }
 
+    /// Whether a main-frame response is Cloudflare's bot check. Cloudflare
+    /// marks challenge responses with `cf-mitigated: challenge`, whatever the
+    /// status code, so this needs no page lookup.
+    func isVerificationChallengeResponse(_ response: URLResponse) -> Bool {
+        guard detectsVerificationChallenge, let response = response as? HTTPURLResponse else { return false }
+        let mitigation = response.value(forHTTPHeaderField: "cf-mitigated")?
+            .trimmingCharacters(in: .whitespaces)
+            .lowercased()
+        return mitigation == "challenge"
+    }
+
     /// Returns `true` when the loaded page is a bot-check interstitial rather
     /// than the provider's app, or `nil` when this provider has none. A page
     /// with a usable composer is the app, whatever its title or text says.
     ///
-    /// The page check stays for now. The challenge's HTTP response could
-    /// replace the challenge-element lookup, but that needs checking against
-    /// the live challenge first.
+    /// The page check stays as a fallback to
+    /// `isVerificationChallengeResponse(_:)` until the `cf-mitigated` header
+    /// has been seen on a live challenge. Remove it after that.
     func verificationChallengeScript() -> String? {
         guard detectsVerificationChallenge else { return nil }
         return """

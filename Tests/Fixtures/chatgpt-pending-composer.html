@@ -1,0 +1,34 @@
+<!doctype html>
+<html><body>
+<!-- ChatGPT's loading stand-in. A signed-in cold load showed a textarea
+     outside any form, replaced about a second later by the real editor
+     inside a form. Whether it swallows Return and hands its text to the
+     editor wasn't observed; that part is modeled on Claude's stand-in. -->
+<textarea id="pending-home-input" aria-label="Ask ChatGPT"></textarea>
+<script>
+window.staticReturnPresses = 0;
+window.editorReturnPresses = 0;
+const standIn = document.querySelector('#pending-home-input');
+standIn.addEventListener('keydown', event => {
+  if (event.key !== 'Enter') return;
+  event.preventDefault();
+  window.staticReturnPresses++;
+});
+setTimeout(() => {
+  const form = document.createElement('form');
+  const editor = document.createElement('div');
+  editor.contentEditable = 'true';
+  editor.setAttribute('role', 'textbox');
+  editor.setAttribute('aria-label', 'Ask ChatGPT');
+  editor.textContent = standIn.value;
+  editor.addEventListener('keydown', event => {
+    if (event.key !== 'Enter' || event.shiftKey || !event.isTrusted) return;
+    event.preventDefault();
+    window.editorReturnPresses++;
+    editor.textContent = '';
+  });
+  form.appendChild(editor);
+  standIn.replaceWith(form);
+}, 800);
+</script>
+</body></html>

@@ -114,6 +114,36 @@ struct CoreTests {
         expect(UpdateChecker.normalizedVersion("1.beta.0") == nil, "Non-numeric release versions should be rejected")
         expect(!UpdateChecker.isNewer(remote: "1..1", local: "1.0.0"), "Malformed versions should not compare as newer")
 
+        // Cloudflare marks a challenge response with `cf-mitigated: challenge`,
+        // whatever its status code.
+        let challengeResponse = { (status: Int, headers: [String: String]) in
+            HTTPURLResponse(url: URL(string: "https://claude.ai/new")!, statusCode: status, httpVersion: "HTTP/1.1", headerFields: headers)!
+        }
+        expect(
+            claudeAdapter.isVerificationChallengeResponse(challengeResponse(403, ["cf-mitigated": "challenge"])),
+            "A cf-mitigated challenge response should mark Claude as needing verification"
+        )
+        expect(
+            claudeAdapter.isVerificationChallengeResponse(challengeResponse(200, ["CF-Mitigated": " Challenge "])),
+            "The challenge header should match whatever its case, spacing, or status"
+        )
+        expect(
+            !claudeAdapter.isVerificationChallengeResponse(challengeResponse(403, [:])),
+            "A 403 without the challenge header must not count as a challenge"
+        )
+        expect(
+            !claudeAdapter.isVerificationChallengeResponse(challengeResponse(200, ["cf-mitigated": "block"])),
+            "Only the challenge value of cf-mitigated counts"
+        )
+        expect(
+            !chatGPTAdapter.isVerificationChallengeResponse(challengeResponse(403, ["cf-mitigated": "challenge"])),
+            "A provider without verification detection must ignore the challenge header"
+        )
+        expect(
+            !claudeAdapter.isVerificationChallengeResponse(URLResponse(url: URL(string: "https://claude.ai")!, mimeType: "text/html", expectedContentLength: 0, textEncodingName: nil)),
+            "A non-HTTP response is never a challenge"
+        )
+
         for service in ChatService.allCases {
             let adapter = ProviderAdapter.adapter(for: service)
             let readiness = adapter.readinessScript()

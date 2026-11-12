@@ -23,6 +23,8 @@ final class BrowserController: NSObject, ObservableObject {
     private lazy var locationBridge = LocationBridge(service: service)
     private lazy var printingBridge = PrintingBridge(service: service, presenter: self)
     private var hasRetriedBlankInitialLoad = false
+    /// Set when the latest main-frame response was a bot-check challenge.
+    private var mainFrameResponseIsChallenge = false
     /// Set while a send holds the keyboard focus lease.
     private var holdsKeyboardFocus = false
     /// Set while a send holds keyboard focus that belongs to the prompt drawer.
@@ -110,6 +112,7 @@ final class BrowserController: NSObject, ObservableObject {
         }
         self.webView = nil
         clearNavigationPhaseTracking()
+        mainFrameResponseIsChallenge = false
         phase = .unloaded
     }
 
@@ -300,6 +303,9 @@ final class BrowserController: NSObject, ObservableObject {
     }
 
     func beginProvisionalNavigation() {
+        // A navigation that finishes without a response of its own, such as
+        // a back/forward restore, must not inherit an earlier challenge.
+        mainFrameResponseIsChallenge = false
         if phaseRestoredForMainFrameDownload == nil, phase != .loading {
             phaseBeforeProvisionalNavigation = phase
         }
@@ -334,9 +340,19 @@ final class BrowserController: NSObject, ObservableObject {
         clearNavigationPhaseTracking()
     }
 
-    private func completeNavigation() {
+    /// Records whether the main frame's response is a bot-check challenge,
+    /// read from its HTTP headers. Each main-frame response replaces the last,
+    /// so the page a solved challenge hands over to clears it.
+    func noteMainFrameResponse(_ response: URLResponse) {
+        mainFrameResponseIsChallenge = adapter.isVerificationChallengeResponse(response)
+    }
+
+    /// Ends a main-frame navigation. A challenge response shows the
+    /// verification state right away. Otherwise the page check still runs
+    /// as a fallback, from `didFinish`.
+    func finishNavigation() {
         clearNavigationPhaseTracking()
-        phase = .ready
+        phase = mainFrameResponseIsChallenge ? .verificationRequired : .ready
     }
 
     private func completeMainFrameDownload(_ download: WKDownload) {
@@ -587,6 +603,11 @@ extension BrowserController: WKNavigationDelegate {
         ) {
             decisionHandler(.download)
         } else {
+            // A download leaves the current page in place, so only a
+            // response that replaces the page updates the challenge state.
+            if navigationResponse.isForMainFrame, self.webView === webView {
+                self.noteMainFrameResponse(navigationResponse.response)
+            }
             decisionHandler(.allow)
         }
     }
@@ -622,7 +643,8 @@ extension BrowserController: WKNavigationDelegate {
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         guard self.webView === webView else { return }
-        self.completeNavigation()
+        self.finishNavigation()
+        guard self.phase != .verificationRequired else { return }
         Task { @MainActor in
             await self.detectVerificationChallenge(in: webView)
             await self.retryBlankInitialLoadIfNeeded(in: webView)

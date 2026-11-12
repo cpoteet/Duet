@@ -804,6 +804,41 @@ struct HostLifecycleTests {
             supersededBrowser.phase == .loading,
             "A navigation cancelled because another one replaced it must not show a failure"
         )
+        let challengeURL = URL(string: "https://claude.ai/new")!
+        let challengeBrowser = BrowserController(service: .claude)
+        challengeBrowser.beginProvisionalNavigation()
+        challengeBrowser.noteMainFrameResponse(HTTPURLResponse(
+            url: challengeURL, statusCode: 403, httpVersion: "HTTP/1.1",
+            headerFields: ["cf-mitigated": "challenge"]
+        )!)
+        challengeBrowser.finishNavigation()
+        expect(
+            challengeBrowser.phase == .verificationRequired,
+            "A Cloudflare challenge response should show the verification state without a page check"
+        )
+        challengeBrowser.beginProvisionalNavigation()
+        challengeBrowser.noteMainFrameResponse(HTTPURLResponse(
+            url: challengeURL, statusCode: 200, httpVersion: "HTTP/1.1", headerFields: [:]
+        )!)
+        challengeBrowser.finishNavigation()
+        expect(
+            challengeBrowser.phase == .ready,
+            "The page the challenge hands over to should be ready again"
+        )
+        let cachedPageBrowser = BrowserController(service: .claude)
+        cachedPageBrowser.beginProvisionalNavigation()
+        cachedPageBrowser.noteMainFrameResponse(HTTPURLResponse(
+            url: challengeURL, statusCode: 403, httpVersion: "HTTP/1.1",
+            headerFields: ["cf-mitigated": "challenge"]
+        )!)
+        cachedPageBrowser.finishNavigation()
+        // A back/forward restore can finish without a new response.
+        cachedPageBrowser.beginProvisionalNavigation()
+        cachedPageBrowser.finishNavigation()
+        expect(
+            cachedPageBrowser.phase == .ready,
+            "A navigation with no response of its own must not inherit an earlier challenge"
+        )
         let timedOutBrowser = BrowserController(service: .claude)
         timedOutBrowser.handleNavigationFailure(URLError(.timedOut))
         expect(
@@ -1106,7 +1141,7 @@ struct HostLifecycleTests {
 
         do {
             try await testComposerFixture(
-                named: "textarea.html",
+                named: "contenteditable.html",
                 service: .chatGPT,
                 failures: &failures
             )
@@ -1127,14 +1162,15 @@ struct HostLifecycleTests {
                     failures: &failures
                 )
             }
-            // Only ChatGPT treats a plain textarea as its composer.
+            // Return that adds a new line instead of sending.
             try await testComposerFixture(
                 named: "send-no-op.html",
                 service: .chatGPT,
                 expectsConfirmation: false,
                 failures: &failures
             )
-            try await testClaudeStaticComposer(failures: &failures)
+            try await testStandInComposer(named: "claude-static-composer.html", service: .claude, failures: &failures)
+            try await testStandInComposer(named: "chatgpt-pending-composer.html", service: .chatGPT, failures: &failures)
             try await testReturnKeyPastPromptDrawer(failures: &failures)
             try await testSendToBothPastPromptDrawer(failures: &failures)
             try await testClaudeSubmissionTiming(failures: &failures)
@@ -1846,31 +1882,36 @@ struct HostLifecycleTests {
         }
     }
 
-    /// A cold Claude load shows a stand-in textarea that swallows Return
-    /// before its real editor mounts. Duet must wait for the editor and
+    /// A cold load shows a stand-in textarea that swallows Return before the
+    /// provider's real editor mounts (Claude's `#static-composer-input`,
+    /// ChatGPT's `#pending-home-input`). Duet must wait for the editor and
     /// press Return there, once.
     @MainActor
-    private static func testClaudeStaticComposer(failures: inout [String]) async throws {
-        let fixtureHTML = try String(contentsOf: fixtureURL("claude-static-composer.html"), encoding: .utf8)
-        let browser = BrowserController(service: .claude)
+    private static func testStandInComposer(
+        named name: String,
+        service: ChatService,
+        failures: inout [String]
+    ) async throws {
+        let fixtureHTML = try String(contentsOf: fixtureURL(name), encoding: .utf8)
+        let browser = BrowserController(service: service)
         let webView = browser.prepare()
         defer { browser.release() }
         webView.configuration.userContentController.removeAllUserScripts()
-        webView.loadHTMLString(fixtureHTML, baseURL: ChatService.claude.startURL)
+        webView.loadHTMLString(fixtureHTML, baseURL: service.startURL)
         let loadDeadline = Date().addingTimeInterval(5)
         while browser.phase != .ready, Date() < loadDeadline {
             try await Task.sleep(for: .milliseconds(25))
         }
         guard browser.phase == .ready else {
-            failures.append("Claude static composer fixture did not load")
+            failures.append("\(service.title) stand-in composer fixture did not load")
             return
         }
         let outcome = await browser.dispatch(prompt: "Past the stand-in")
-        expect(outcome == .sent, "Claude's stand-in composer must not take the send, got \(outcome)", failures: &failures)
+        expect(outcome == .sent, "\(service.title)'s stand-in composer must not take the send, got \(outcome)", failures: &failures)
         let staticPresses: Int = try await evaluate("window.staticReturnPresses", in: webView)
         let editorPresses: Int = try await evaluate("window.editorReturnPresses", in: webView)
-        expect(staticPresses == 0, "Return must not go to Claude's stand-in composer", failures: &failures)
-        expect(editorPresses == 1, "Return must go to Claude's real editor once, got \(editorPresses)", failures: &failures)
+        expect(staticPresses == 0, "Return must not go to \(service.title)'s stand-in composer", failures: &failures)
+        expect(editorPresses == 1, "Return must go to \(service.title)'s real editor once, got \(editorPresses)", failures: &failures)
     }
 
     /// Key events reach the page asynchronously, so poll for the composer to
@@ -1954,7 +1995,7 @@ struct HostLifecycleTests {
             webView.navigationDelegate = nil
             webView.stopLoading()
         }
-        try await loader.load(fixtureURL("textarea.html"), in: webView)
+        try await loader.load(fixtureURL("contenteditable.html"), in: webView)
 
         let adapter = ProviderAdapter.adapter(for: .chatGPT)
         let prompt = "Repeated prompt"
@@ -1962,7 +2003,7 @@ struct HostLifecycleTests {
             """
             (() => {
               window.returnPresses = 0;
-              document.querySelector('textarea').addEventListener('keydown', event => {
+              document.querySelector('[contenteditable]').addEventListener('keydown', event => {
                 if (event.key === 'Enter' && event.isTrusted) window.returnPresses++;
               });
               return true;
@@ -1972,7 +2013,7 @@ struct HostLifecycleTests {
         ) as Bool
         _ = try await evaluate(adapter.fillScript(prompt: prompt), in: webView) as ScriptResult
         _ = try await evaluate(
-            "(() => { document.querySelector('textarea').value = ''; return true; })()",
+            "(() => { document.querySelector('[contenteditable]').textContent = ''; return true; })()",
             in: webView
         ) as Bool
 
@@ -1982,19 +2023,19 @@ struct HostLifecycleTests {
 
         _ = try await evaluate(adapter.fillScript(prompt: prompt), in: webView) as ScriptResult
         _ = try await evaluate(
-            "(() => { document.querySelector('textarea').value += ' edited'; return true; })()",
+            "(() => { document.querySelector('[contenteditable]').textContent += ' edited'; return true; })()",
             in: webView
         ) as Bool
         let editedSubmission: ScriptResult = try await evaluate(adapter.returnKeyTargetScript(prompt: prompt), in: webView)
         expect(!editedSubmission.ok, "An edited composer must not submit a changed prompt", failures: &failures)
         _ = try await evaluate(
-            "(() => { document.querySelector('textarea').value = 'Different draft'; return true; })()",
+            "(() => { document.querySelector('[contenteditable]').textContent = 'Different draft'; return true; })()",
             in: webView
         ) as Bool
         let editedConfirmation: Bool = try await evaluate(adapter.submissionConfirmationScript(), in: webView)
         expect(!editedConfirmation, "A different composer draft must not confirm submission", failures: &failures)
         _ = try await evaluate(
-            "(() => { document.querySelector('textarea').value = ''; return true; })()",
+            "(() => { document.querySelector('[contenteditable]').textContent = ''; return true; })()",
             in: webView
         ) as Bool
         _ = try await evaluate(adapter.fillScript(prompt: prompt), in: webView) as ScriptResult
@@ -2019,12 +2060,12 @@ struct HostLifecycleTests {
             webView.navigationDelegate = nil
             webView.stopLoading()
         }
-        try await loader.load(fixtureURL("textarea.html"), in: webView)
+        try await loader.load(fixtureURL("contenteditable.html"), in: webView)
 
         _ = try await evaluate(
             """
             (() => {
-              document.querySelector('textarea').value = "Existing provider draft";
+              document.querySelector('[contenteditable]').textContent = "Existing provider draft";
               return true;
             })()
             """,
@@ -2036,7 +2077,7 @@ struct HostLifecycleTests {
         expect(fill.reason == "composer-not-empty", "Draft protection should return its specific reason", failures: &failures)
 
         let preservedDraft: String = try await evaluate(
-            "document.querySelector('textarea').value",
+            "document.querySelector('[contenteditable]').textContent",
             in: webView
         )
         expect(preservedDraft == "Existing provider draft", "A blocked native prompt must preserve the provider draft", failures: &failures)

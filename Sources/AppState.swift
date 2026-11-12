@@ -1,3 +1,4 @@
+import AppKit
 import Combine
 import Foundation
 
@@ -319,6 +320,15 @@ final class AppState: ObservableObject {
         }
     }
 
+    /// Whether a provider page holds keyboard focus in its window.
+    var providerPageHoldsKeyboardFocus: Bool {
+        ChatService.allCases.contains { service in
+            guard let webView = browser(for: service).webView,
+                  let firstResponder = webView.window?.firstResponder as? NSView else { return false }
+            return firstResponder === webView || firstResponder.isDescendant(of: webView)
+        }
+    }
+
     func isBusy(_ service: ChatService) -> Bool {
         activeDispatchServices.contains(service) || resettingServices.contains(service)
     }
@@ -380,5 +390,67 @@ final class AppState: ObservableObject {
             .map { browser(for: $0) }
             .filter { $0.webView?.superview == nil }
             .forEach { $0.release() }
+    }
+}
+
+/// Moves keyboard focus into a native prompt field and checks that it got there.
+@MainActor
+enum PromptFocus {
+    /// SwiftUI sometimes drops a focus request made as the drawer appears,
+    /// and nothing asks again: the page that kept first responder never
+    /// tries to take focus, so it never refuses an attempt and hands focus
+    /// back. Ask, then check, and ask again a few times while the field
+    /// still lacks focus. A click or Tab from the user moves focus on
+    /// purpose, so stop asking once `userMovedFocus` reports one. Returns
+    /// whether the field ended up focused.
+    @discardableResult
+    static func take(
+        attempts: Int = 4,
+        checkDelay: Duration = .milliseconds(50),
+        setFocused: (Bool) -> Void,
+        isFocused: () -> Bool,
+        userMovedFocus: () -> Bool = { false }
+    ) async -> Bool {
+        for attempt in 0..<attempts {
+            guard !Task.isCancelled else { return false }
+            if attempt > 0 {
+                guard !userMovedFocus() else { return false }
+                // The focus state may still read true while a page holds
+                // first responder, and setting it to true again does
+                // nothing. Clear it, then set it on the next turn.
+                setFocused(false)
+                await Task.yield()
+                guard !Task.isCancelled else { return false }
+            }
+            setFocused(true)
+            try? await Task.sleep(for: checkDelay)
+            guard !Task.isCancelled else { return false }
+            if isFocused() { return true }
+        }
+        return false
+    }
+}
+
+/// Notes a click or Tab press, the events by which the user moves keyboard
+/// focus on purpose. Call `stop()` when done watching.
+@MainActor
+final class UserFocusEventMonitor {
+    private(set) var sawUserFocusEvent = false
+    private var monitor: Any?
+
+    init() {
+        monitor = NSEvent.addLocalMonitorForEvents(
+            matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown, .keyDown]
+        ) { [weak self] event in
+            if event.type != .keyDown || event.keyCode == 48 {
+                MainActor.assumeIsolated { self?.sawUserFocusEvent = true }
+            }
+            return event
+        }
+    }
+
+    func stop() {
+        if let monitor { NSEvent.removeMonitor(monitor) }
+        monitor = nil
     }
 }

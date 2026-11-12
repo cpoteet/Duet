@@ -1157,6 +1157,7 @@ struct HostLifecycleTests {
         await testRapidSplitReversals(failures: &failures)
         await testRetentionChangesDuringPendingCleanup(failures: &failures)
         await testRepeatedTransitionSoak(failures: &failures)
+        await testDrawerPromptFocus(failures: &failures)
 
         if failures.isEmpty {
             print("Browser host and fixture integration tests passed.")
@@ -1180,6 +1181,153 @@ struct HostLifecycleTests {
     @MainActor
     private static func settle() async {
         try? await Task.sleep(for: .milliseconds(20))
+    }
+
+    /// The drawer must end up with keyboard focus even when SwiftUI drops
+    /// its first request and a provider page keeps first responder.
+    @MainActor
+    private static func testDrawerPromptFocus(failures: inout [String]) async {
+        let state = AppState()
+        let window = NSWindow(
+            contentRect: .init(x: 0, y: 0, width: 400, height: 400),
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        let field = NSTextView(frame: .init(x: 0, y: 0, width: 400, height: 100))
+        window.contentView?.addSubview(field)
+        if let webView = state.browser(for: .chatGPT).webView {
+            webView.frame = .init(x: 0, y: 100, width: 400, height: 300)
+            window.contentView?.addSubview(webView)
+            window.makeFirstResponder(webView)
+        }
+        expect(
+            state.providerPageHoldsKeyboardFocus,
+            "A provider page that is first responder should count as holding keyboard focus",
+            failures: &failures
+        )
+
+        // The first request is dropped, as SwiftUI sometimes does when the
+        // drawer appears. Later ones go through.
+        var requests: [Bool] = []
+        let focused = await PromptFocus.take(
+            checkDelay: .milliseconds(1),
+            setFocused: { isFocused in
+                requests.append(isFocused)
+                if isFocused, requests.count > 1 { window.makeFirstResponder(field) }
+            },
+            isFocused: { !state.providerPageHoldsKeyboardFocus }
+        )
+        expect(focused, "The drawer should take focus after its first request is dropped", failures: &failures)
+        expect(
+            window.firstResponder === field,
+            "A dropped drawer focus request must not leave the provider page with keyboard focus",
+            failures: &failures
+        )
+        expect(
+            requests == [true, false, true],
+            "A repeated drawer focus request should clear the focus state before setting it again",
+            failures: &failures
+        )
+        expect(
+            !state.providerPageHoldsKeyboardFocus,
+            "A provider page should not count as holding focus once the drawer field has it",
+            failures: &failures
+        )
+
+        var immediateRequests = 0
+        let immediatelyFocused = await PromptFocus.take(
+            checkDelay: .milliseconds(1),
+            setFocused: { if $0 { immediateRequests += 1 } },
+            isFocused: { true }
+        )
+        expect(
+            immediatelyFocused && immediateRequests == 1,
+            "A drawer focus request that takes should not be repeated",
+            failures: &failures
+        )
+
+        var refusedRequests = 0
+        let refusedFocus = await PromptFocus.take(
+            attempts: 3,
+            checkDelay: .milliseconds(1),
+            setFocused: { if $0 { refusedRequests += 1 } },
+            isFocused: { false }
+        )
+        expect(
+            !refusedFocus && refusedRequests == 3,
+            "A drawer focus request should give up after its attempts rather than keep taking focus",
+            failures: &failures
+        )
+
+        // The user clicks into a page or presses Tab while the drawer is
+        // still checking its first request. That move is deliberate, so the
+        // drawer must not take focus back.
+        var userMovedFocus = false
+        var interruptedRequests = 0
+        let interruptedFocus = await PromptFocus.take(
+            checkDelay: .milliseconds(1),
+            setFocused: { isFocused in
+                guard isFocused else { return }
+                interruptedRequests += 1
+                userMovedFocus = true
+            },
+            isFocused: { false },
+            userMovedFocus: { userMovedFocus }
+        )
+        expect(
+            !interruptedFocus && interruptedRequests == 1,
+            "A click or Tab from the user must stop the drawer from taking focus back",
+            failures: &failures
+        )
+
+        window.makeKeyAndOrderFront(nil)
+        let userFocusEvents = UserFocusEventMonitor()
+        func keyDown(_ keyCode: UInt16, _ characters: String) -> NSEvent? {
+            NSEvent.keyEvent(
+                with: .keyDown,
+                location: .zero,
+                modifierFlags: [],
+                timestamp: ProcessInfo.processInfo.systemUptime,
+                windowNumber: window.windowNumber,
+                context: nil,
+                characters: characters,
+                charactersIgnoringModifiers: characters,
+                isARepeat: false,
+                keyCode: keyCode
+            )
+        }
+        if let letter = keyDown(7, "x") { NSApp.sendEvent(letter) }
+        expect(
+            !userFocusEvents.sawUserFocusEvent,
+            "Typing a letter should not count as the user moving focus",
+            failures: &failures
+        )
+        if let tab = keyDown(48, "\t") { NSApp.sendEvent(tab) }
+        expect(
+            userFocusEvents.sawUserFocusEvent,
+            "Pressing Tab should count as the user moving focus",
+            failures: &failures
+        )
+        userFocusEvents.stop()
+
+        var cancelledRequests = 0
+        let cancelledFocus = Task { @MainActor in
+            await PromptFocus.take(
+                checkDelay: .seconds(10),
+                setFocused: { if $0 { cancelledRequests += 1 } },
+                isFocused: { false }
+            )
+        }
+        await Task.yield()
+        cancelledFocus.cancel()
+        let cancelledResult = await cancelledFocus.value
+        expect(
+            !cancelledResult && cancelledRequests <= 1,
+            "Closing the drawer should stop its pending focus requests",
+            failures: &failures
+        )
+        window.orderOut(nil)
     }
 
     @MainActor

@@ -37,7 +37,7 @@ The prompt drawer is a native text box at the bottom of the workspace. Open it w
 - With one provider showing, Send to ChatGPT or Send to Claude (Command-Return) sends to that provider, and Send to Both (Command-Option-Return) switches to split view and sends to both.
 - In split view, Send to Both is the only option (Command-Return).
 
-Duet types your prompt into each provider's own message box and presses its send button, and each provider reports its own status. After every provider confirms, the drawer clears and closes. If a send fails, or you edit the text while it's sending, Duet keeps your draft. It never resends on its own, and it won't overwrite a message you already started typing in a provider's box.
+Duet types your prompt into each provider's own message box and presses Return to send it, and each provider reports its own status. After every provider confirms, the drawer clears and closes. If a send fails, or you edit the text while it's sending, Duet keeps your draft. It never resends on its own, and it won't overwrite a message you already started typing in a provider's box.
 
 The drawer handles text only. For attachments and provider-specific tools, use the provider's own composer.
 

@@ -35,6 +35,7 @@
       <div class="nav-links" id="nav-links">
         <a href="#features">Features</a>
         <a href="#start">Get started</a>
+        <a href="#guide">Guide</a>
       </div>
       <a class="button button-primary nav-download" href="https://github.com/cpoteet/Duet/releases/latest">Download</a>
     </nav>
@@ -152,15 +153,60 @@
       </div>
     </section>
 
-    <section class="closing" aria-labelledby="closing-heading">
-      <div class="container closing-inner">
-        <img class="closing-icon" src="assets/duet-icon-256.webp" alt="" width="96" height="96" loading="lazy">
-        <h2 id="closing-heading">Try Duet.</h2>
-        <p>Free for Macs running macOS 27 or later.</p>
-        <div class="hero-actions">
-          <a class="button button-primary" href="https://github.com/cpoteet/Duet/releases/latest">Download Duet</a>
-          <a class="button button-secondary" data-release-notes href="https://github.com/cpoteet/Duet/releases/tag/v2.3.0"><span>What's new in <span data-version="short">2.3</span></span></a>
+    <section class="guide" id="guide" aria-labelledby="guide-heading">
+      <div class="container">
+        <div class="band-head">
+          <div>
+            <p class="section-label">User guide</p>
+            <h2 id="guide-heading">Using Duet.</h2>
+          </div>
+          <p class="lead">The shortcuts and the few things worth knowing. For everything else, read the <a href="https://github.com/cpoteet/Duet#readme">full README on GitHub</a>.</p>
         </div>
+
+        <div class="guide-body">
+          <div class="guide-shortcuts">
+            <h3>Shortcuts</h3>
+            <dl>
+              <div><dt>Show ChatGPT</dt><dd><kbd>⌘</kbd><kbd>1</kbd></dd></div>
+              <div><dt>Show Claude</dt><dd><kbd>⌘</kbd><kbd>2</kbd></dd></div>
+              <div><dt>Show both, side by side</dt><dd><kbd>⌘</kbd><kbd>3</kbd></dd></div>
+              <div><dt>New conversation</dt><dd><kbd>⌘</kbd><kbd>N</kbd></dd></div>
+              <div><dt>Open or close the prompt drawer</dt><dd><kbd>⌘</kbd><kbd>⇧</kbd><kbd>P</kbd></dd></div>
+              <div><dt>Send to the provider you're in</dt><dd><kbd>⌘</kbd><kbd>↩</kbd></dd></div>
+              <div><dt>Send to both <span>In split view, <kbd>⌘</kbd><kbd>↩</kbd></span></dt><dd><kbd>⌥</kbd><kbd>⌘</kbd><kbd>↩</kbd></dd></div>
+              <div><dt>Quick Prompt, from any app</dt><dd><kbd>⌃</kbd><kbd>⌥</kbd><kbd>Space</kbd></dd></div>
+            </dl>
+          </div>
+
+          <ul class="guide-topics">
+            <li>
+              <h3>Sending from the drawer</h3>
+              <p>Each provider shows its own status. When all of them confirm, the drawer clears. If a send fails, or you edit the text while it sends, Duet keeps your draft and never resends on its own. The drawer is text only, so attach files in the provider's own message box.</p>
+            </li>
+            <li>
+              <h3>Quick Prompt</h3>
+              <p>Open it with <kbd>⌃</kbd><kbd>⌥</kbd><kbd>Space</kbd>, Tools → Quick Prompt, or by right-clicking Duet in the Dock. Every provider you pick gets a new conversation, and Duet brings its window back even if you closed or minimized it.</p>
+            </li>
+            <li>
+              <h3>Notifications</h3>
+              <p>When a response finishes while you're in another app, Duet tells you. Click the notification to go back to it. Turn this off with Notify when responses finish in Settings.</p>
+            </li>
+            <li>
+              <h3>Files, printing, and links</h3>
+              <p>Attach with the file picker or drag files in from Finder. Downloads ask where to save, and printing opens the Mac print panel. Links to other sites open in your default browser.</p>
+            </li>
+            <li>
+              <h3>Signing out</h3>
+              <p>Choose Session → Reset ChatGPT Website Data or Reset Claude Website Data to sign out of one provider and clear its saved data. The other stays signed in.</p>
+            </li>
+            <li>
+              <h3>Updates</h3>
+              <p>A banner appears when a new release is out. Download it and replace the copy in Applications. Duet never downloads or installs anything by itself.</p>
+            </li>
+          </ul>
+        </div>
+
+        <p class="guide-version">This guide covers Duet <span data-version="short">2.3</span>. <a data-release-notes href="https://github.com/cpoteet/Duet/releases/tag/v2.3.0">See what's new in this release</a>.</p>
       </div>
     </section>
   </main>

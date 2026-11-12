@@ -45,7 +45,7 @@
 }
 
 /* Navy sections redefine the tokens so their contents read light in both appearances. */
-.band, .closing {
+.band, .guide {
   --background: #1b2849;
   --foreground: #edf1fa;
   --muted: #b3bdd6;
@@ -286,13 +286,25 @@ kbd { display: inline-block; font-family: var(--mono); font-size: 0.8em; font-we
 .license-note strong { color: var(--foreground); font-weight: 600; }
 .license-note a { font-weight: 600; white-space: nowrap; }
 
-/* Closing */
-.closing { margin-top: 120px; background: var(--navy); padding-block: 96px; }
-.closing-inner { display: flex; flex-direction: column; align-items: center; text-align: center; }
-.closing-icon { width: 96px; height: 96px; border-radius: 22px; box-shadow: 0 0 0 1px var(--border), 0 18px 36px -18px var(--shot-shadow); }
-.closing h2 { margin-top: 28px; }
-.closing p { color: var(--muted); font-size: 17px; margin: 12px 0 0; }
-.closing .hero-actions { margin-top: 28px; }
+/* User guide: a shortcut sheet beside short notes on the behavior the features above don't cover. */
+.guide { margin-top: 120px; background: var(--navy); padding-block: 96px; }
+.guide .lead a { text-decoration-color: currentColor; }
+.guide-body { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); gap: 56px; align-items: start; margin-top: 48px; }
+.guide-shortcuts { padding: 24px 28px 12px; border-radius: 12px; background: var(--surface); border: 1px solid var(--border); }
+.guide-shortcuts h3 { font-size: 17px; line-height: 1.3; }
+.guide-shortcuts dl { margin: 12px 0 0; }
+.guide-shortcuts dl > div { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; padding-block: 12px; border-top: 1px solid var(--border); }
+.guide-shortcuts dt { font-size: 15px; line-height: 1.4; }
+.guide-shortcuts dt span { display: block; color: var(--muted); font-size: 13px; margin-top: 2px; }
+.guide-shortcuts dd { margin: 0; white-space: nowrap; }
+.guide-shortcuts kbd { font-size: 13px; }
+.guide-shortcuts dt kbd { font-size: 12px; }
+.guide-topics { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 32px 40px; }
+.guide-topics li { padding-top: 20px; border-top: 1px solid var(--border); }
+.guide-topics h3 { font-size: 17px; line-height: 1.3; }
+.guide-topics p { color: var(--muted); font-size: 15px; line-height: 1.55; margin: 6px 0 0; }
+.guide-version { margin: 48px 0 0; padding-top: 24px; border-top: 1px solid var(--border); font-size: 14px; color: var(--muted); }
+.guide-version a { font-weight: 600; text-decoration-color: currentColor; }
 
 /* Footer */
 .site-footer { padding-top: 32px; padding-bottom: 48px; }
@@ -309,7 +321,7 @@ kbd { display: inline-block; font-family: var(--mono); font-size: 0.8em; font-we
 @media (max-width: 1000px) {
   .feature-list { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .steps { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .band-head, .feature-row { grid-template-columns: 1fr; gap: 32px; }
+  .band-head, .feature-row, .guide-body { grid-template-columns: 1fr; gap: 32px; }
   .band-head { gap: 20px; }
   .feature-row-flip .feature-visual { order: 0; }
   .feature-row-wide { gap: 12px; }
@@ -324,7 +336,7 @@ kbd { display: inline-block; font-family: var(--mono); font-size: 0.8em; font-we
   .hero-stage { margin-top: 40px; }
   .hero-shot { border-radius: 8px; }
   .band { padding-block: 72px; }
-  .closing { margin-top: 88px; padding-block: 72px; }
+  .guide { margin-top: 88px; padding-block: 72px; }
   /* Phone header: brand, Download, menu button. The section links open as a full-width panel under the header. */
   .site-nav { gap: 10px; }
   .brand { margin-right: auto; }
@@ -388,7 +400,8 @@ kbd { display: inline-block; font-family: var(--mono); font-size: 0.8em; font-we
 @media (max-width: 540px) {
   .container { padding-inline: 20px; }
   .site-nav[data-menu-ready] .nav-links { padding-inline: 20px; }
-  .feature-list, .steps { grid-template-columns: 1fr; }
+  .feature-list, .steps, .guide-topics { grid-template-columns: 1fr; }
+  .guide-shortcuts { padding-inline: 20px; }
   .feature-list { gap: 28px; margin-top: 64px; }
   .demo { margin-top: 32px; }
   .demo-video { border-radius: 8px; }

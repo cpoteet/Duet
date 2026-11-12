@@ -331,10 +331,16 @@ struct ContentView: View {
             let userFocusEvents = UserFocusEventMonitor()
             defer { userFocusEvents.stop() }
             _ = await appState.waitForWorkspaceMount(for: appState.isSplitView ? .both : .current)
+            // Stop retrying once a send is under way, as after Send to Both
+            // from one pane: the send takes focus for its page to fill it and
+            // press Return, then gives focus back to the drawer itself.
+            // Retrying would pull focus out of the page mid-fill.
             await PromptFocus.take(
                 setFocused: { isDrawerPromptFocused = $0 },
                 isFocused: { isDrawerPromptFocused && !appState.providerPageHoldsKeyboardFocus },
-                userMovedFocus: { userFocusEvents.sawUserFocusEvent }
+                userMovedFocus: {
+                    userFocusEvents.sawUserFocusEvent || !appState.activeDispatchServices.isEmpty
+                }
             )
         }
         .onChange(of: appState.promptFocusRequest) {

@@ -7,7 +7,8 @@ Google Fonts assets. Copyright 2024 The Geist Project Authors
 (https://github.com/vercel/geist-font). Licensed under the SIL Open Font
 License, Version 1.1; see OFL.txt in this directory.
 
-Source Serif 4 is copied from the Source Serif 4 Project's Google Fonts
-latin subset. Copyright 2014 The Source Serif 4 Project Authors
+Source Serif 4 is the Source Serif 4 Project's Google Fonts latin subset,
+instanced to weight 600 with fontTools (optical size kept, 20–60).
+Copyright 2014 The Source Serif 4 Project Authors
 (https://github.com/adobe-fonts/source-serif). Licensed under the SIL Open
 Font License, Version 1.1; see OFL-Source-Serif-4.txt in this directory.

@@ -6,12 +6,48 @@
   src: url("assets/geist-latin.woff2") format("woff2");
 }
 
+/* Pinned to the 600 weight every serif heading uses, keeping the optical-size axis (20–60),
+   which cuts the file from 122 KB to 36 KB. */
 @font-face {
   font-family: "Source Serif 4";
   font-style: normal;
-  font-weight: 400 700;
+  font-weight: 600;
   font-display: swap;
-  src: url("assets/source-serif-4-latin.woff2") format("woff2");
+  src: url("assets/source-serif-4-semibold-latin.woff2") format("woff2");
+}
+
+/* Stand-ins sized to the web fonts' widths and line metrics, so text barely moves when the web
+   fonts swap in. Source Serif 4 at 600 and display sizes reads like Times New Roman regular, not
+   Georgia Bold. size-adjust also scales the overrides, hence the divided values. PostScript names come
+   first because Safari reads a local() name as a family and would pick Times New Roman Bold for 600. */
+@font-face {
+  font-family: "Source Serif 4 Fallback";
+  font-weight: 400 700;
+  src: local("TimesNewRomanPSMT"), local("Times New Roman");
+  size-adjust: 104%; /* the hero headline wraps to the same lines from 320px to 1600px wide */
+  ascent-override: 99.6%;
+  descent-override: 32.2%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: "Geist Fallback";
+  font-weight: 100 499;
+  src: local("HelveticaNeue"), local("Helvetica Neue"), local("ArialMT"), local("Arial");
+  size-adjust: 101%;
+  ascent-override: 99.5%;
+  descent-override: 29.2%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: "Geist Fallback";
+  font-weight: 500 900;
+  src: local("HelveticaNeue-Bold"), local("Helvetica Neue Bold"), local("Arial-BoldMT"), local("Arial Bold");
+  size-adjust: 101%;
+  ascent-override: 99.5%;
+  descent-override: 29.2%;
+  line-gap-override: 0%;
 }
 
 @font-face {
@@ -39,7 +75,7 @@
   --band-deep: light-dark(#dfe3ea, #1f232a);
   --navy: light-dark(#14203f, #172447);
   --shot-shadow: light-dark(rgb(14 22 48 / 22%), rgb(0 0 0 / 60%));
-  --serif: "Source Serif 4", Georgia, serif;
+  --serif: "Source Serif 4", "Source Serif 4 Fallback", Georgia, serif;
   --mono: "Geist Mono", monospace;
   --ease: cubic-bezier(0.2, 0.7, 0.2, 1);
 }
@@ -62,12 +98,14 @@
 }
 
 * { box-sizing: border-box; }
-html { scroll-behavior: smooth; scroll-padding-top: 88px; }
+/* The nav targets each section's heading block, not the padded section, so it lands just under the
+   sticky header (about 68px tall) with a little room. */
+html { scroll-behavior: smooth; scroll-padding-top: 100px; }
 body {
   margin: 0;
   background: var(--background);
   color: var(--foreground);
-  font-family: "Geist", sans-serif;
+  font-family: "Geist", "Geist Fallback", sans-serif;
   font-size: 16px;
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;

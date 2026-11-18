@@ -204,15 +204,18 @@ kbd { display: inline-block; font-family: var(--mono); font-size: 0.8em; font-we
 .hero-stage {
   margin-top: 64px;
   padding-top: 8px;
-  background: linear-gradient(to bottom, var(--background) 0, var(--background) 34%, var(--navy) 34%, var(--navy) 100%);
+  /* Navy is the background color, with the page color painted over the top 34%. A gradient that
+     ran to navy at the bottom could leave a light hairline against the band at fractional heights. */
+  background: linear-gradient(var(--background), var(--background)) top / 100% 34% no-repeat, var(--navy);
 }
+/* The screenshot carries its own rounded, transparent window corners and outline, so the shadow
+   is a drop-shadow that follows them. A box-shadow ring would trace the image's square box instead. */
 .hero-shot {
   display: block;
   width: 100%;
   height: auto;
   margin: 0 auto;
-  border-radius: 12px;
-  box-shadow: 0 0 0 1px var(--border), 0 30px 60px -24px var(--shot-shadow), 0 12px 24px -16px var(--shot-shadow);
+  filter: drop-shadow(0 24px 28px color-mix(in srgb, var(--shot-shadow) 55%, transparent)) drop-shadow(0 6px 10px color-mix(in srgb, var(--shot-shadow) 45%, transparent));
 }
 
 /* Quick Prompt band */
@@ -372,7 +375,6 @@ kbd { display: inline-block; font-family: var(--mono); font-size: 0.8em; font-we
   .hero { padding-top: 56px; }
   .hero-description { font-size: 18px; }
   .hero-stage { margin-top: 40px; }
-  .hero-shot { border-radius: 8px; }
   .band { padding-block: 72px; }
   .guide { margin-top: 88px; padding-block: 72px; }
   /* Phone header: brand, Download, menu button. The section links open as a full-width panel under the header. */
